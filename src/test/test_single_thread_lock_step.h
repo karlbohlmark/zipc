@@ -1,0 +1,1 @@
+void test_single_thread_lock_step();
