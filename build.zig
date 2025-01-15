@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const MESSAGE_SIZE = 8;
-const QUEUE_SIZE = 4;
+const MESSAGE_SIZE = 1536;
+const QUEUE_SIZE = 64;
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -26,6 +26,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // const config_header = b.addConfigHeader(.{
+    //     .include_path = "zipc_config.h",
+    //     .style = .blank,
+    // }, .{
+    //     .ZIPC_MESSAGE_SIZE = MESSAGE_SIZE,
+    //     .ZIPC_QUEUE_SIZE = QUEUE_SIZE,
+    // });
+    // lib.addConfigHeader(config_header);
+    lib.installHeader(b.path("include/zipc.h"), "zipc.h");
     const options = b.addOptions();
     options.addOption(comptime_int, "message_size", MESSAGE_SIZE);
     options.addOption(comptime_int, "queue_size", QUEUE_SIZE);
@@ -49,6 +58,46 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // c++ receiver example
+    const cpp_receiver = b.addExecutable(.{
+        .name = "cpp_receiver",
+        .target = target,
+        .optimize = optimize,
+    });
+    cpp_receiver.addCSourceFiles(.{
+        .root = b.path("src/example/cpp"),
+        .files = &.{
+            "receiver.cpp",
+        },
+    });
+    cpp_receiver.linkLibrary(lib);
+    cpp_receiver.addIncludePath(b.path("include"));
+    cpp_receiver.linkLibCpp();
+    b.installArtifact(cpp_receiver);
+    const run_cpp_receiver = b.addRunArtifact(cpp_receiver);
+    const run_cpp_receiver_step = b.step("run-c++-receiver", "Run c++ receiver example");
+    run_cpp_receiver_step.dependOn(&run_cpp_receiver.step);
+
+    // c++ sender example
+    const cpp_sender = b.addExecutable(.{
+        .name = "cpp_sender",
+        .target = target,
+        .optimize = optimize,
+    });
+    cpp_sender.addCSourceFiles(.{
+        .root = b.path("src/example/cpp"),
+        .files = &.{
+            "sender.cpp",
+        },
+    });
+    cpp_sender.linkLibrary(lib);
+    cpp_sender.addIncludePath(b.path("include"));
+    cpp_sender.linkLibCpp();
+    b.installArtifact(cpp_sender);
+    const run_cpp_sender = b.addRunArtifact(cpp_sender);
+    const run_cpp_sender_step = b.step("run-c++-sender", "Run c++ sender example");
+    run_cpp_sender_step.dependOn(&run_cpp_sender.step);
+
     const c_test = b.addExecutable(.{
         .name = "c_test",
         .target = target,
@@ -59,55 +108,55 @@ pub fn build(b: *std.Build) void {
         .files = &.{ "test.c", "test_separate_threads.c", "test_single_thread_lock_step.c" },
     });
     const config_header = b.addConfigHeader(.{
-        .include_path = "config.h",
+        .include_path = "zipc_test_config.h",
         .style = .blank,
     }, .{
         .ZIPC_MESSAGE_SIZE = MESSAGE_SIZE,
         .ZIPC_QUEUE_SIZE = QUEUE_SIZE,
     });
 
+    c_test.linkLibrary(lib);
     c_test.addConfigHeader(config_header);
     c_test.addIncludePath(b.path("include"));
     c_test.linkLibC();
-    c_test.linkLibrary(lib);
     const run_c_tests = b.addRunArtifact(c_test);
 
     b.installArtifact(c_test);
 
-    // Add server executable
-    const server = b.addExecutable(.{
-        .name = "server",
-        .root_source_file = b.path("src/server.zig"),
+    // Add receiver executable
+    const receiver = b.addExecutable(.{
+        .name = "receiver",
+        .root_source_file = b.path("src/example_receiver.zig"),
         .target = target,
         .optimize = optimize,
     });
-    b.installArtifact(server);
+    b.installArtifact(receiver);
+    receiver.linkLibrary(lib);
 
-    // Add client executable
-    const client = b.addExecutable(.{
-        .name = "client",
-        .root_source_file = b.path("src/client.zig"),
+    // Add sender executable
+    const sender = b.addExecutable(.{
+        .name = "sender",
+        .root_source_file = b.path("src/example_sender.zig"),
         .target = target,
         .optimize = optimize,
     });
-    b.installArtifact(client);
+    b.installArtifact(sender);
 
-    // Add run steps for server and client
-    const server_run_cmd = b.addRunArtifact(server);
-    server_run_cmd.step.dependOn(b.getInstallStep());
+    const receiver_run_cmd = b.addRunArtifact(receiver);
+    receiver_run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        server_run_cmd.addArgs(args);
+        receiver_run_cmd.addArgs(args);
     }
-    const server_run_step = b.step("run-server", "Run the server");
-    server_run_step.dependOn(&server_run_cmd.step);
+    const receiver_run_step = b.step("run-receiver", "Run the receiver");
+    receiver_run_step.dependOn(&receiver_run_cmd.step);
 
-    const client_run_cmd = b.addRunArtifact(client);
-    client_run_cmd.step.dependOn(b.getInstallStep());
+    const sender_run_cmd = b.addRunArtifact(sender);
+    sender_run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        client_run_cmd.addArgs(args);
+        sender_run_cmd.addArgs(args);
     }
-    const client_run_step = b.step("run-client", "Run the client");
-    client_run_step.dependOn(&client_run_cmd.step);
+    const sender_run_step = b.step("run-sender", "Run the sender");
+    sender_run_step.dependOn(&sender_run_cmd.step);
 
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish

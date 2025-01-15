@@ -6,14 +6,19 @@
 #include <assert.h>
 
 #include "zipc.h"
+#include "zipc_test_config.h"
 #include "./test_single_thread_lock_step.h"
 
 #define TEST_MESSAGE_1 "hello"
 #define TEST_MESSAGE_2 "world"
 #define TEST_MESSAGE_3 "!"
 
+#define ZipcSender ZipcContext
+#define ZipcReceiver ZipcContext
+
 void test_single_thread_lock_step() {
-    unlink(zipc_shm_path("/testar"));
+    zipc_unlink("/testar");
+    printf("C sizeof sender: %lu\n", sizeof(ZipcSender));
     ZipcSender sender = zipc_1536_64_create_sender("/testar");
     ZipcReceiver receiver = zipc_1536_64_create_receiver("/testar");
     uint8_t *message = NULL;
@@ -39,4 +44,5 @@ void test_single_thread_lock_step() {
     assert(message != NULL);
     assert(message_size == strlen(TEST_MESSAGE_3) + 1);
     message = NULL;
+    printf("test function done\n");
 }

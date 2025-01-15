@@ -6,7 +6,11 @@
 #include <assert.h>
 
 #include "zipc.h"
+#include "zipc_test_config.h"
 #include "./test_separate_threads.h"
+
+#define ZipcSender ZipcContext
+#define ZipcReceiver ZipcContext
 
 #define TEST_MESSAGE_1 "hello"
 #define TEST_MESSAGE_2 "world"

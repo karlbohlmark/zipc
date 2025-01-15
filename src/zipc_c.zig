@@ -8,6 +8,7 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
     const allocator = std.heap.page_allocator;
     return struct {
         pub fn zipc_create_receiver(name: [*:0]const u8) Zipc(message_size, queue_size).ZipcClientReceiver {
+            std.debug.print("zipc_create_receiver {} {}\n", .{ message_size, queue_size });
             const name_slice = std.mem.span(name);
             const shm_fd = shm.open(allocator, name_slice, .{
                 .CREAT = true,
@@ -47,6 +48,7 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
             return ZipcInstance.initClient(name_slice, shared_memory, client_id);
         }
         pub fn zipc_create_sender(name: [*:0]const u8) Zipc(message_size, queue_size).ZipcServerSender {
+            std.debug.print("zipc_create_sender {} {}\n", .{ message_size, queue_size });
             const name_slice = std.mem.span(name);
             // shm.unlink(allocator, name_slice);
             const shm_fd = shm.open(allocator, name_slice, .{

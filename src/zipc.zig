@@ -1,13 +1,13 @@
 const std = @import("std");
 
-const handshake = @import("./handshake.zig");
 const queue = @import("./queue.zig");
+const QueueLengthType = queue.LengthType;
 const shm = @import("./shm.zig");
 const constants = @import("./constants.zig");
-const send_fd = handshake.send_fd;
-const receive_fd = handshake.receive_fd;
 
 const FD = std.os.linux.fd_t;
+
+const ZipcName = [39:0]u8;
 
 pub fn sockAddrFromName(name: []const u8) struct { std.os.linux.sockaddr.un, usize } {
     var addr = std.os.linux.sockaddr.un{
@@ -24,16 +24,21 @@ const ZipcControlMethod = enum(u8) {
     Disconnect,
 };
 
+const ZipcConnectionMode = enum(u8) {
+    Server,
+    Client,
+};
+
 pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) type {
     return struct {
         const Queue = queue.LamportQueueU64(queue_size_param);
-        pub const shared_memory_size = @sizeOf(queue.LamportQueueU64(queue_size_param)) + message_size_param * queue_size_param + @sizeOf(@typeInfo(@FieldType(ZipcServerSender, "init_flag")).pointer.child);
-        pub const message_size: u16 = message_size_param;
-        pub const queue_size: u16 = queue_size_param;
+        pub const shared_memory_size = @sizeOf(queue.LamportQueueU64(queue_size_param)) + message_size_param * queue_size_param + @sizeOf(i32);
+        pub const message_size: u32 = message_size_param;
+        pub const queue_size: QueueLengthType = queue_size_param;
 
         pub const ZipcParams = packed struct {
-            message_size: u16 = message_size_param,
-            queue_size: u16 = queue_size_param,
+            message_size: u32 = message_size_param,
+            queue_size: QueueLengthType = queue_size_param,
         };
 
         const ZipcServer = struct {
@@ -42,10 +47,17 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
             abstract_domain_socket: std.os.linux.fd_t,
         };
 
+        comptime {
+            std.debug.assert(88 == @sizeOf(ZipcServerSender));
+            std.debug.assert(@sizeOf(ZipcServerSender) == @sizeOf(ZipcClientReceiver));
+        }
+
         pub const ZipcServerSender = extern struct {
             const Self = @This();
             server_id: u64,
-            name: [*:0]const u8,
+            connection_mode: ZipcConnectionMode = ZipcConnectionMode.Server,
+            padding: [7]u8 = undefined,
+            name: ZipcName,
             params: ZipcParams = .{
                 .message_size = message_size_param,
                 .queue_size = queue_size_param,
@@ -55,34 +67,43 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
             init_flag: *i32,
 
             pub fn send(self: *Self, message: []const u8) void {
-                std.debug.print("zig side sending message of len {}: #{s}#\n", .{ message.len, message });
-                self.dumpHex();
+                // std.debug.print("zig side sending message of len {}\n", .{message.len});
+                // self.dumpHex();
                 const next_index = self.queue.tail;
                 std.mem.copyForwards(u8, self.buffers[next_index][0..message.len], message);
                 _ = self.queue.enqueue(message.len);
+                const wake_return_val = std.os.linux.futex_wake(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAKE, 1);
+                std.debug.print("wake_return_val: {}\n", .{wake_return_val});
             }
 
             pub fn init(name: [*:0]const u8, shared_mem_ptr: *align(8) [shared_memory_size]u8, server_id: u64) ZipcServerSender {
-                std.debug.lockStdErr();
-                std.debug.print("dump hex from sender {*}\n", .{shared_mem_ptr});
-                std.debug.dumpHex(shared_mem_ptr[0..shared_memory_size]);
-                std.debug.unlockStdErr();
+                const name_slice = std.mem.span(name);
+                if (name_slice.len >= 40) {
+                    @panic("name length cannot be longer than 39");
+                }
+                var dest_name: ZipcName = undefined;
+                std.mem.copyForwards(u8, dest_name[0..name_slice.len], name_slice);
+                dest_name[name_slice.len] = 0;
+                // std.debug.lockStdErr();
+                // std.debug.print("dump hex from sender {*}\n", .{shared_mem_ptr});
+                // std.debug.dumpHex(shared_mem_ptr[0..shared_memory_size]);
+                // std.debug.unlockStdErr();
                 const queue_byte_size: usize = @intCast(@sizeOf(queue.LamportQueueU64(queue_size_param)));
                 const buffers_bytes_size: usize = @intCast(message_size_param * queue_size_param);
                 const init_flag_ptr_int: usize = @intFromPtr(shared_mem_ptr) + queue_byte_size + buffers_bytes_size;
                 const init_flag_ptr: *i32 = @ptrFromInt(init_flag_ptr_int);
-                std.debug.print("init_flag value before init: {}\n", .{init_flag_ptr.*});
+                // std.debug.print("init_flag value before init: {}\n", .{init_flag_ptr.*});
                 var q: *Queue = @ptrCast(@alignCast(shared_mem_ptr));
                 if (init_flag_ptr.* != constants.ZIPC_MAGIC) {
                     q.init();
                     @atomicStore(i32, init_flag_ptr, constants.ZIPC_MAGIC, .release);
                 }
                 // std.debug.print("will wake", .{});
-                _ = std.os.linux.futex_wake(init_flag_ptr, std.os.linux.FUTEX.WAKE, 1);
-                std.debug.print("init_flag value after init: {}\n", .{init_flag_ptr.*});
+                // std.debug.print("init_flag value after init: {}\n", .{init_flag_ptr.*});
                 return .{
                     .server_id = server_id,
-                    .name = name,
+                    .connection_mode = ZipcConnectionMode.Server,
+                    .name = dest_name,
                     .params = .{
                         .message_size = message_size_param,
                         .queue_size = queue_size_param,
@@ -95,7 +116,7 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
 
             pub fn dumpHex(self: *Self) void {
                 const mem_pointer = self.getSharedMemoryPointer();
-                std.debug.print("dump hex from sender {*}\n", .{mem_pointer});
+                std.debug.print("dump hex from sender {} {*}\n", .{ shared_memory_size, mem_pointer });
                 std.debug.dumpHex(mem_pointer[0..shared_memory_size]);
             }
 
@@ -119,7 +140,9 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
             const Self = @This();
 
             client_id: u64,
-            name: [*:0]const u8,
+            connection_mode: ZipcConnectionMode = ZipcConnectionMode.Client,
+            padding: [7]u8 = undefined,
+            name: ZipcName,
             params: ZipcParams = .{
                 .message_size = message_size_param,
                 .queue_size = queue_size_param,
@@ -135,25 +158,67 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                 };
             }
 
-            pub fn receive(self: *Self) struct { u32, []u8 } {
-                std.debug.lockStdErr();
-                std.debug.print("receive dump hex\n", .{});
-                self.dumpHex();
-                std.debug.unlockStdErr();
-                const index, const val = self.queue.dequeue();
-                if (index > (1 << 16)) {
-                    return .{ 1 << 17, &[_]u8{} };
-                } else {
+            pub fn receive(self: *Self) ?struct { QueueLengthType, []u8 } {
+                var current_tail: QueueLengthType = 0;
+                if (self.queue.dequeue(&current_tail)) |item| {
+                    const index, const val = item;
+                    std.debug.print("received val {}\n", .{val});
                     return .{ index, self.buffers[index][0..val] };
+                } else {
+                    return null;
+                }
+            }
+
+            pub fn receive_blocking(self: *Self, timeout_ms: u16) ?struct { QueueLengthType, []u8 } {
+                // self.dumpHex();
+                if (timeout_ms >= 1000) {
+                    @panic("timeout_ms must be less than 1000");
+                }
+                var current_tail: QueueLengthType = 0;
+                if (self.queue.dequeue(&current_tail)) |item| {
+                    const index, const val = item;
+                    return .{ index, self.buffers[index][0..val] };
+                } else {
+                    std.debug.print("queue empty, waiting\n", .{});
+                    const timestamp_ms = std.time.milliTimestamp();
+                    const timeout_timespec = std.posix.timespec{
+                        .sec = 0,
+                        .nsec = @intCast((@as(u32, @intCast(timeout_ms)) % 1000) * 1_000_000),
+                    };
+                    const futex_return_value = std.os.linux.futex_wait(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAIT, @intCast(current_tail), &timeout_timespec);
+                    if (futex_return_value != 0) {
+                        std.debug.print("futex_wait failed: {}\n", .{futex_return_value});
+                    }
+                    // This could be a spurious wake up, so we check again
+                    const next = self.receive();
+                    if (next) |item| {
+                        return item;
+                    }
+                    const elapsed_ms: i64 = std.time.milliTimestamp() - @as(i64, @intCast(timestamp_ms));
+                    if (elapsed_ms < timeout_ms) {
+                        const remaining_ms: i64 = @as(i64, @intCast(timeout_ms)) - elapsed_ms;
+                        return self.receive_blocking(@truncate(@abs(remaining_ms)));
+                    } else {
+                        std.debug.print("receive_blocking timed out\n", .{});
+                        return null;
+                    }
                 }
             }
 
             pub fn init(name: [*:0]const u8, shared_mem_ptr: *align(8) [shared_memory_size]u8, client_id: u64) ZipcClientReceiver {
+                const name_slice = std.mem.span(name);
+                if (name_slice.len >= 40) {
+                    @panic("name length cannot be longer than 39");
+                }
+                var dest_name: ZipcName = undefined;
+                std.mem.copyForwards(u8, dest_name[0..name_slice.len], name_slice);
+                dest_name[name_slice.len] = 0;
                 const queue_byte_size: usize = @intCast(@sizeOf(queue.LamportQueueU64(queue_size_param)));
                 const buffers_bytes_size: usize = @intCast(message_size_param * queue_size_param);
                 return .{
                     .client_id = client_id,
-                    .name = name,
+                    .connection_mode = ZipcConnectionMode.Client,
+                    .name = dest_name,
                     .params = .{
                         .message_size = message_size_param,
                         .queue_size = queue_size_param,

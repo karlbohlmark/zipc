@@ -20,6 +20,7 @@ void run_test(const char* test_name) {
             printf("           | Executing '%s' |           \n", test_name);
             printf("------------------------------------------------------------\n");
             test_cases[i].func();
+            printf("Did run test\n");
             printf("%s passed!\n", test_name);
             return;
         }

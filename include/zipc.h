@@ -1,16 +1,12 @@
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
-#include <stdatomic.h>
+// #include <zipc_config.h>
 
-#define ZIPC_MESSAGE_SIZE 8
-#define ZIPC_QUEUE_SIZE 4
+#define ZIPC_MODE_SERVER 0
+#define ZIPC_MODE_CLIENT 1
 
-typedef struct {
-    uint64_t buffer[ZIPC_QUEUE_SIZE]; // Circular buffer for the queue
-    _Atomic uint32_t head;             // Consumer index (atomic for thread safety)
-    // uint8_t padding[64];               // Padding to prevent false sharing
-    _Atomic uint32_t tail;             // Producer index (atomic for thread safety)
-} ZipcQueue;
+typedef struct ZipcQueue ZipcQueue;
 
 typedef struct {
     uint32_t message_size;
@@ -18,29 +14,34 @@ typedef struct {
 } ZipcParams;
 
 typedef struct {
-    uint64_t client_id;
-    const char *name;
+    uint64_t id;
+    uint8_t mode;
+    uint8_t padding[7];
+    char name[40];
     ZipcParams params;
     ZipcQueue *queue;
-    uint8_t (*buffers)[ZIPC_QUEUE_SIZE][ZIPC_MESSAGE_SIZE];
+    void *buffers;
     int32_t *init_flag;
-} ZipcReceiver;
+    // 88 bytes
+} ZipcContext;
 
-typedef struct {
-    uint64_t server_id;
-    const char *name;
-    ZipcParams params;
-    ZipcQueue *queue;
-    uint8_t (*buffers)[ZIPC_QUEUE_SIZE][ZIPC_MESSAGE_SIZE];
-    int32_t *init_flag;
-} ZipcSender;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-ZipcReceiver zipc_1536_64_create_receiver(const char *name);
-ZipcSender zipc_1536_64_create_sender(const char *name);
+ZipcContext zipc_1536_64_create_receiver(const char *name);
+ZipcContext zipc_1536_64_create_sender(const char *name);
+void zipc_unlink(const char *name);
 
-uint32_t zipc_1536_64_send(ZipcSender *sender, const uint8_t *message, size_t message_size);
-uint32_t zipc_1536_64_receive(ZipcReceiver *receiver, uint8_t **message);
+void zipc_1536_64_send(ZipcContext *sender, const uint8_t *message, size_t message_size);
+uint32_t zipc_1536_64_receive(ZipcContext *receiver, uint8_t **message);
 
-size_t zipc_1536_64_receiver_wait_for_initialization(ZipcReceiver *receiver);
+uint32_t zipc_1536_64_receive_blocking(ZipcContext *receiver, uint8_t **message, uint16_t timeout_millis);
+
+size_t zipc_1536_64_receiver_wait_for_initialization(ZipcContext *receiver);
 
 char* zipc_shm_path(const char *name);
+
+#ifdef __cplusplus
+}
+#endif

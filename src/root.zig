@@ -4,9 +4,18 @@ const Zipc = mod.Zipc;
 const Zipc_c = @import("./zipc_c.zig").Zipc_c;
 const constants = @import("./constants.zig");
 
+// const zipc_h = @cImport({
+//     @cInclude("zipc.h");
+// });
+
+// comptime {
+//     std.debug.assert(@sizeOf(zipc_h.ZipcContext) == @sizeOf(Zipc_c(1536, 64).ZipcContext));
+// }
+
 const build_options = @import("build_options");
 
 const Zipc_1536_64 = Zipc(build_options.message_size, build_options.queue_size);
+// const Zipc_1536_64 = Zipc(8, 4);
 export fn zipc_1536_64_create_receiver(name: [*:0]const u8) Zipc_1536_64.ZipcClientReceiver {
     const zipc_c = Zipc_c(
         Zipc_1536_64.message_size,
@@ -19,7 +28,13 @@ export fn zipc_1536_64_create_sender(name: [*:0]const u8) Zipc_1536_64.ZipcServe
         Zipc_1536_64.message_size,
         Zipc_1536_64.queue_size,
     );
+    std.debug.print("zig size of sender {}\n", .{@sizeOf(Zipc_1536_64.ZipcServerSender)});
     return zipc_c.zipc_create_sender(name);
+}
+export fn zipc_unlink(name: [*:0]const u8) void {
+    const path = zipc_shm_path(name);
+    const result = std.os.linux.unlink(path);
+    _ = result;
 }
 export fn zipc_1536_64_receiver_wait_for_initialization(receiver: *Zipc_1536_64.ZipcClientReceiver) usize {
     // std.debug.print("init_flag value: {}\n", .{receiver.init_flag.*});
@@ -35,15 +50,26 @@ export fn zipc_1536_64_send(sender: *Zipc_1536_64.ZipcServerSender, message: [*]
     const message_slice: []const u8 = message[0..message_size];
     sender.send(message_slice);
 }
-export fn zipc_1536_64_receive(receiver: *Zipc_1536_64.ZipcClientReceiver, message: *[*]const u8) usize {
-    const index, const message_slice = receiver.receive();
-    // std.debug.print("receive got message_slice ptr {*}", .{message_slice.ptr});
-    if (index == (1 << 17)) {
-        // want to set message.* to null but don't know how
-    } else {
+export fn zipc_1536_64_receive(receiver: *Zipc_1536_64.ZipcClientReceiver, message: *[*]allowzero const u8) usize {
+    // receiver.dumpHex();
+    if (receiver.receive()) |item| {
+        _, const message_slice = item;
         message.* = message_slice.ptr;
+        return message_slice.len;
+    } else {
+        message.* = @ptrFromInt(0);
+        return 0;
     }
-    return message_slice.len;
+}
+export fn zipc_1536_64_receive_blocking(receiver: *Zipc_1536_64.ZipcClientReceiver, message: *[*]allowzero const u8, timeout_ms: u16) usize {
+    if (receiver.receive_blocking(timeout_ms)) |item| {
+        _, const message_slice = item;
+        message.* = message_slice.ptr;
+        return message_slice.len;
+    } else {
+        message.* = @ptrFromInt(0);
+        return 0;
+    }
 }
 
 const Zipc_1536_256 = Zipc(1536, 256);
