@@ -28,7 +28,6 @@ export fn zipc_1536_64_create_sender(name: [*:0]const u8) Zipc_1536_64.ZipcServe
         Zipc_1536_64.message_size,
         Zipc_1536_64.queue_size,
     );
-    std.debug.print("zig size of sender {}\n", .{@sizeOf(Zipc_1536_64.ZipcServerSender)});
     return zipc_c.zipc_create_sender(name);
 }
 export fn zipc_unlink(name: [*:0]const u8) void {
@@ -37,7 +36,6 @@ export fn zipc_unlink(name: [*:0]const u8) void {
     _ = result;
 }
 export fn zipc_1536_64_receiver_wait_for_initialization(receiver: *Zipc_1536_64.ZipcClientReceiver) usize {
-    // std.debug.print("init_flag value: {}\n", .{receiver.init_flag.*});
     const futex_wait_return = std.os.linux.futex_wait(
         receiver.init_flag,
         std.os.linux.FUTEX.WAIT,
@@ -51,7 +49,6 @@ export fn zipc_1536_64_send(sender: *Zipc_1536_64.ZipcServerSender, message: [*]
     sender.send(message_slice);
 }
 export fn zipc_1536_64_receive(receiver: *Zipc_1536_64.ZipcClientReceiver, message: *[*]allowzero const u8) usize {
-    // receiver.dumpHex();
     if (receiver.receive()) |item| {
         _, const message_slice = item;
         message.* = message_slice.ptr;

@@ -1,7 +1,10 @@
+/* SPDX-License-Identifier: MIT */
+#ifndef LIB_ZIPC_H
+#define LIB_ZIPC_H
+
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-// #include <zipc_config.h>
 
 #define ZIPC_MODE_SERVER 0
 #define ZIPC_MODE_CLIENT 1
@@ -45,3 +48,4 @@ char* zipc_shm_path(const char *name);
 #ifdef __cplusplus
 }
 #endif
+#endif // LIB_ZIPC_H

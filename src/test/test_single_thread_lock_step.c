@@ -18,7 +18,6 @@
 
 void test_single_thread_lock_step() {
     zipc_unlink("/testar");
-    printf("C sizeof sender: %lu\n", sizeof(ZipcSender));
     ZipcSender sender = zipc_1536_64_create_sender("/testar");
     ZipcReceiver receiver = zipc_1536_64_create_receiver("/testar");
     uint8_t *message = NULL;
