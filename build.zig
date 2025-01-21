@@ -29,6 +29,10 @@ pub fn build(b: *std.Build) void {
             .pic = true,
         }),
     });
+    lib.bundle_compiler_rt = true;
+    if (target.result.isDarwin()) {
+        lib.linkLibC();
+    }
     // const config_header = b.addConfigHeader(.{
     //     .include_path = "zipc_config.h",
     //     .style = .blank,
