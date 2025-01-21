@@ -1,5 +1,5 @@
 const std = @import("std");
-const shm = @import("./shm.zig");
+const os = @import("./os.zig");
 const Zipc = @import("./zipc.zig").Zipc;
 const unix_mod = @import("./unix.zig");
 const bindUnixSocket = unix_mod.bindUnixSocket;
@@ -12,7 +12,7 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
         pub fn zipc_create_receiver(name: [*:0]const u8) Zipc(message_size, queue_size).ZipcClientReceiver {
             log.debug("zipc_create_receiver {} {}", .{ message_size, queue_size });
             const name_slice = std.mem.span(name);
-            const shm_fd = shm.open(allocator, name_slice, .{
+            const shm_fd = os.shm_open(allocator, name_slice, .{
                 .CREAT = true,
                 .ACCMODE = .RDWR,
             }, 0o600);
@@ -40,7 +40,7 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
             // std.debug.unlockStdErr();
 
             var ts: std.posix.timespec = undefined;
-            std.posix.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts) catch |err| {
+            std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts) catch |err| {
                 log.debug("clock_gettime failed: {}", .{err});
                 std.process.exit(1);
             };
@@ -51,7 +51,7 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
             log.debug("zipc_create_sender {} {}", .{ message_size, queue_size });
             const name_slice = std.mem.span(name);
             // shm.unlink(allocator, name_slice);
-            const shm_fd = shm.open(allocator, name_slice, .{
+            const shm_fd = os.shm_open(allocator, name_slice, .{
                 .CREAT = true,
                 .ACCMODE = .RDWR,
             }, 0o600);
@@ -75,14 +75,14 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
             log.debug("sender did mmap, pointer: {*}", .{shared_memory});
 
             var ts: std.posix.timespec = undefined;
-            std.posix.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts) catch |err| {
+            std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts) catch |err| {
                 log.debug("clock_gettime failed: {}", .{err});
                 std.process.exit(1);
             };
-            const pid = std.os.linux.getpid();
+            const pid = os.getpid();
             const server_id: u64 = getIdentifyFromPidAndTime(pid, ts);
-            const control_socket_fd = bindUnixSocket(name_slice);
-            _ = control_socket_fd;
+            // const control_socket_fd = bindUnixSocket(name_slice);
+            // _ = control_socket_fd;
             return ZipcInstance.initServerSenderWithBuffer(name_slice, shared_memory, server_id);
         }
     };

@@ -3,6 +3,7 @@ const mod = @import("./zipc.zig");
 const Zipc = mod.Zipc;
 const Zipc_c = @import("./zipc_c.zig").Zipc_c;
 const constants = @import("./constants.zig");
+const os = @import("./os.zig");
 
 // const zipc_h = @cImport({
 //     @cInclude("zipc.h");
@@ -32,17 +33,8 @@ export fn zipc_1536_64_create_sender(name: [*:0]const u8) Zipc_1536_64.ZipcServe
 }
 export fn zipc_unlink(name: [*:0]const u8) void {
     const path = zipc_shm_path(name);
-    const result = std.os.linux.unlink(path);
+    const result = os.unlink(path);
     _ = result;
-}
-export fn zipc_1536_64_receiver_wait_for_initialization(receiver: *Zipc_1536_64.ZipcClientReceiver) usize {
-    const futex_wait_return = std.os.linux.futex_wait(
-        receiver.init_flag,
-        std.os.linux.FUTEX.WAIT,
-        @intCast(0),
-        null,
-    );
-    return futex_wait_return;
 }
 export fn zipc_1536_64_send(sender: *Zipc_1536_64.ZipcServerSender, message: [*]const u8, message_size: usize) void {
     const message_slice: []const u8 = message[0..message_size];

@@ -1,8 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const queue = @import("./queue.zig");
 const QueueLengthType = queue.LengthType;
-const shm = @import("./shm.zig");
+const os = @import("os.zig");
 const constants = @import("./constants.zig");
 
 const FD = std.os.linux.fd_t;
@@ -72,9 +73,11 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                 const next_index = self.queue.tail;
                 std.mem.copyForwards(u8, self.buffers[next_index][0..message.len], message);
                 _ = self.queue.enqueue(message.len);
-                const wake_return_val = std.os.linux.futex_wake(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAKE, 1);
 
-                log.debug("wake_return_val: {}", .{wake_return_val});
+                if (builtin.target.os.tag == .linux) {
+                    const wake_return_val = std.os.linux.futex_wake(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAKE, 1);
+                    log.debug("wake_return_val: {}", .{wake_return_val});
+                }
             }
 
             pub fn init(name: [*:0]const u8, shared_mem_ptr: *align(8) [shared_memory_size]u8, server_id: u64) ZipcServerSender {
@@ -186,9 +189,15 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                         .sec = 0,
                         .nsec = @intCast((@as(u32, @intCast(timeout_ms)) % 1000) * 1_000_000),
                     };
-                    const futex_return_value = std.os.linux.futex_wait(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAIT, @intCast(current_tail), &timeout_timespec);
-                    if (futex_return_value != 0) {
-                        log.debug("futex_wait failed: {}", .{futex_return_value});
+                    if (builtin.target.os.tag == .linux) {
+                        const futex_return_value = std.os.linux.futex_wait(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAIT, @intCast(current_tail), &timeout_timespec);
+                        if (futex_return_value != 0) {
+                            log.debug("futex_wait failed: {}", .{futex_return_value});
+                        }
+                    } else {
+                        while (self.queue.tail == current_tail) {
+                            os.nanosleep(0, 1_000_000); // 1ms
+                        }
                     }
                     // This could be a spurious wake up, so we check again
                     const next = self.receive();
@@ -278,23 +287,36 @@ pub fn run_client() !void {
     const queue_size = 128;
     const ZipcInstance = Zipc(message_size, queue_size);
     const socket_name = "/well-known-server-name";
-    const shm_fd = shm.open(allocator, socket_name, .{
+    const shm_fd = os.shm_open(allocator, socket_name, .{
         .CREAT = true,
         .ACCMODE = .RDWR,
     }, 0o600);
     const fd: std.os.linux.fd_t = @intCast(shm_fd);
     const null_addr: ?[*]u8 = null; // Hint to the kernel: no specific address
     const shared_memory_size: comptime_int = ZipcInstance.shared_memory_size;
-    const shared_mem_pointer = std.os.linux.mmap(
-        null_addr,
-        shared_memory_size,
-        std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
-        .{
-            .TYPE = .SHARED,
-        },
-        fd,
-        0,
-    );
+    const shared_mem_pointer = switch (builtin.os.tag) {
+        .linux => std.os.linux.mmap(
+            null_addr,
+            shared_memory_size,
+            std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
+            .{
+                .TYPE = .SHARED,
+            },
+            fd,
+            0,
+        ),
+        .macos => std.c.mmap(
+            null_addr,
+            shared_memory_size,
+            std.posix.PROT.READ | std.posix.PROT.WRITE,
+            .{
+                .TYPE = .SHARED,
+            },
+            fd,
+            0,
+        ),
+        else => @panic("unsupported OS"),
+    };
     const shared_memory: *align(8) [shared_memory_size]u8 = @ptrFromInt(shared_mem_pointer);
     var ipc_client = ZipcInstance.initClient(
         socket_name,
@@ -312,20 +334,20 @@ test "client server connection test" {
     const ZipcInstance = Zipc(message_size, queue_size);
     const socket_name = "/well-known-server-name";
     const shared_memory_size: comptime_int = ZipcInstance.shared_memory_size;
-    const shm_fd = shm.open(allocator, socket_name, .{
+    const shm_fd = os.shm_open(allocator, socket_name, .{
         .CREAT = true,
         .ACCMODE = .RDWR,
     }, 0o600);
     // Open or create the shared memory object
     std.debug.assert(shm_fd != -1);
-    const fd: std.os.linux.fd_t = @intCast(shm_fd);
-    const ftruncate_result = std.os.linux.ftruncate(shm_fd, shared_memory_size);
-    std.debug.assert(ftruncate_result == 0);
+    const fd: std.posix.fd_t = @intCast(shm_fd);
+    os.ftruncate(shm_fd, shared_memory_size);
+
     const null_addr: ?[*]u8 = null; // Hint to the kernel: no specific address
-    const shared_mem_pointer = std.os.linux.mmap(
+    const shared_mem_pointer = os.mmap(
         null_addr,
         shared_memory_size,
-        std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
+        std.posix.PROT.READ | std.posix.PROT.WRITE,
         .{
             .TYPE = .SHARED,
         },
