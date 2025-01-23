@@ -52,6 +52,28 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    const wf = b.addWriteFiles();
+    const pkgconfig =
+        \\prefix=/usr/local
+        \\exec_prefix=${prefix}
+        \\libdir=${exec_prefix}/lib
+        \\includedir=${prefix}/include
+        \\Name: libzipc
+        \\Description: Shared memory IPC
+        \\Version: 1.0
+        \\Libs: -L${libdir} -lzipc
+        \\Cflags: -I${includedir}
+        \\
+    ;
+    const libzipcPkgConfigPath = wf.add("pkgconfig/libzipc.pc", pkgconfig);
+    const installPkgConfigFile = b.addInstallFileWithDir(
+        libzipcPkgConfigPath,
+        .lib,
+        "pkgconfig/libzipc.pc",
+    );
+    // _ = installPkgConfigFile;
+    b.getInstallStep().dependOn(&installPkgConfigFile.step);
+
     // const install_header = b.addInstallFile(lib.getEmittedH(), "include");
     // b.getInstallStep().dependOn(&install_header.step);
 
