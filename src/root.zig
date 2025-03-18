@@ -61,20 +61,37 @@ export fn zipc_1536_64_receive_blocking(receiver: *Zipc_1536_64.ZipcClientReceiv
     }
 }
 
-const Zipc_1536_256 = Zipc(1536, 256);
-export fn zipc_1536_256_create_receiver(name: [*:0]const u8) Zipc_1536_256.ZipcClientReceiver {
+const RAW_HD_FRAME_SIZE = 8388608;
+const Zipc_RAW = Zipc(RAW_HD_FRAME_SIZE, 16);
+export fn zipc_raw_create_receiver(name: [*:0]const u8) Zipc_RAW.ZipcClientReceiver {
     const zipc_c = Zipc_c(
-        Zipc_1536_256.message_size,
-        Zipc_1536_256.queue_size,
+        Zipc_RAW.message_size,
+        Zipc_RAW.queue_size,
     );
     return zipc_c.zipc_create_receiver(name);
 }
-export fn zipc_1536_256_create_sender(name: [*:0]const u8) Zipc_1536_256.ZipcServerSender {
+export fn zipc_raw_create_sender(name: [*:0]const u8) Zipc_RAW.ZipcServerSender {
     const zipc_c = Zipc_c(
-        Zipc_1536_256.message_size,
-        Zipc_1536_256.queue_size,
+        Zipc_RAW.message_size,
+        Zipc_RAW.queue_size,
     );
     return zipc_c.zipc_create_sender(name);
+}
+
+export fn zipc_raw_send(sender: *Zipc_RAW.ZipcServerSender, message: [*]const u8, message_size: usize) void {
+    const message_slice: []const u8 = message[0..message_size];
+    sender.send(message_slice);
+}
+
+export fn zipc_raw_receive(receiver: *Zipc_RAW.ZipcClientReceiver, message: *[*]allowzero const u8) usize {
+    if (receiver.receive()) |item| {
+        _, const message_slice = item;
+        message.* = message_slice.ptr;
+        return message_slice.len;
+    } else {
+        message.* = @ptrFromInt(0);
+        return 0;
+    }
 }
 
 export fn zipc_shm_path(name: [*:0]const u8) [*:0]const u8 {
