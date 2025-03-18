@@ -30,7 +30,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     lib.bundle_compiler_rt = true;
-    if (target.result.isDarwin()) {
+    if (target.result.os.tag.isDarwin()) {
         lib.linkLibC();
     }
     // const config_header = b.addConfigHeader(.{

@@ -39,8 +39,7 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
             // std.debug.dumpHex(shared_memory[0..shared_memory_size]);
             // std.debug.unlockStdErr();
 
-            var ts: std.posix.timespec = undefined;
-            std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts) catch |err| {
+            const ts: std.posix.timespec = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch |err| {
                 log.debug("clock_gettime failed: {}", .{err});
                 std.process.exit(1);
             };
@@ -74,8 +73,7 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
             const shared_memory: *align(8) [shared_memory_size]u8 = @ptrFromInt(shared_mem_pointer);
             log.debug("sender did mmap, pointer: {*}", .{shared_memory});
 
-            var ts: std.posix.timespec = undefined;
-            std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts) catch |err| {
+            const ts: std.posix.timespec = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch |err| {
                 log.debug("clock_gettime failed: {}", .{err});
                 std.process.exit(1);
             };
