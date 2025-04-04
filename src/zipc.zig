@@ -34,8 +34,8 @@ const ZipcConnectionMode = enum(u8) {
 
 pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) type {
     return struct {
-        const Queue = queue.LamportQueueU64(queue_size_param);
-        pub const shared_memory_size = @sizeOf(queue.LamportQueueU64(queue_size_param)) + message_size_param * queue_size_param + @sizeOf(i32);
+        const Queue = queue.Queue;
+        pub const shared_memory_size = @sizeOf(queue.Queue) + queue_size_param * @sizeOf(queue.ValueType) + message_size_param * queue_size_param + @sizeOf(i32);
         pub const message_size: u32 = message_size_param;
         pub const queue_size: QueueLengthType = queue_size_param;
 
@@ -65,14 +65,14 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                 .message_size = message_size_param,
                 .queue_size = queue_size_param,
             },
-            queue: *queue.LamportQueueU64(queue_size_param),
+            queue: *queue.Queue,
             buffers: *[queue_size_param][message_size_param]u8,
             init_flag: *i32,
 
             pub fn send(self: *Self, message: []const u8) void {
                 const next_index = self.queue.tail;
                 std.mem.copyForwards(u8, self.buffers[next_index][0..message.len], message);
-                _ = self.queue.enqueue(message.len);
+                _ = self.queue.enqueue(queue_size_param, message.len);
 
                 if (builtin.target.os.tag == .linux) {
                     const wake_return_val = std.os.linux.futex_wake(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAKE, 1);
@@ -92,7 +92,7 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                 // log.debug("dump hex from sender {*}", .{shared_mem_ptr});
                 // std.debug.dumpHex(shared_mem_ptr[0..shared_memory_size]);
                 // std.debug.unlockStdErr();
-                const queue_byte_size: usize = @intCast(@sizeOf(queue.LamportQueueU64(queue_size_param)));
+                const queue_byte_size: usize = queueByteSize(queue_size_param);
                 const buffers_bytes_size: usize = @intCast(message_size_param * queue_size_param);
                 const init_flag_ptr_int: usize = @intFromPtr(shared_mem_ptr) + queue_byte_size + buffers_bytes_size;
                 const init_flag_ptr: *i32 = @ptrFromInt(init_flag_ptr_int);
@@ -125,10 +125,10 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
             }
 
             pub fn dumpQueueHex(self: *Self) void {
-                const QueueType = queue.LamportQueueU64(queue_size_param);
-                log.debug("dump queue hex ({}) from sender", .{@sizeOf(QueueType)});
+                const queue_size_bytes = @sizeOf(queue.Queue) + queue_size_param * @sizeOf(queue.ValueType);
+                log.debug("dump queue hex ({}) from sender", .{queue_size_bytes});
                 const mem_pointer = self.getSharedMemoryPointer();
-                std.debug.dumpHex(mem_pointer[0..@sizeOf(QueueType)]);
+                std.debug.dumpHex(mem_pointer[0..queue_size_bytes]);
             }
 
             pub fn getSharedMemoryPointer(self: *Self) *align(8) [shared_memory_size]u8 {
@@ -151,7 +151,7 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                 .message_size = message_size_param,
                 .queue_size = queue_size_param,
             },
-            queue: *queue.LamportQueueU64(queue_size_param),
+            queue: *queue.Queue,
             buffers: *[queue_size_param][message_size_param]u8,
             init_flag: *i32,
 
@@ -164,7 +164,7 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
 
             pub fn receive(self: *Self) ?struct { QueueLengthType, []u8 } {
                 var current_tail: QueueLengthType = 0;
-                if (self.queue.dequeue(&current_tail)) |item| {
+                if (self.queue.dequeue(queue_size_param, &current_tail)) |item| {
                     const index, const val = item;
                     log.debug("received val {}", .{val});
                     return .{ index, self.buffers[index][0..val] };
@@ -179,7 +179,7 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                     @panic("timeout_ms must be less than 1000");
                 }
                 var current_tail: QueueLengthType = 0;
-                if (self.queue.dequeue(&current_tail)) |item| {
+                if (self.queue.dequeue(queue_size_param, &current_tail)) |item| {
                     const index, const val = item;
                     return .{ index, self.buffers[index][0..val] };
                 } else {
@@ -223,7 +223,7 @@ pub fn Zipc(message_size_param: comptime_int, queue_size_param: comptime_int) ty
                 var dest_name: ZipcName = undefined;
                 std.mem.copyForwards(u8, dest_name[0..name_slice.len], name_slice);
                 dest_name[name_slice.len] = 0;
-                const queue_byte_size: usize = @intCast(@sizeOf(queue.LamportQueueU64(queue_size_param)));
+                const queue_byte_size: usize = queueByteSize(queue_size_param);
                 const buffers_bytes_size: usize = @intCast(message_size_param * queue_size_param);
                 return .{
                     .client_id = client_id,
@@ -386,4 +386,8 @@ test "client server connection test" {
     //     .whitespace = .minified,
     // });
     // log.debug("connect request: {s}", .{client_connect_json});
+}
+
+fn queueByteSize(length: queue.LengthType) usize {
+    return @intCast(@sizeOf(queue.Queue) + length * @sizeOf(queue.ValueType));
 }
