@@ -6,16 +6,26 @@ pub const ValueType = u64;
 
 pub const Queue = extern struct {
     head: LengthType = 0,
-    padding: [64 - @sizeOf(LengthType)]u8,
+    padding1: [64 - @sizeOf(LengthType)]u8,
     // padding: [64]u8 = undefined,
     tail: LengthType = 0,
-    buffer: [*]ValueType = undefined,
+    padding2: [64 - @sizeOf(LengthType)]u8,
 
     const Self = @This();
 
     pub fn init(self: *Self) void {
         self.head = 0;
         self.tail = 0;
+    }
+
+    pub fn itemsPtr(self: *Self) [*]ValueType {
+        const self_bytes: [*]u8 = @ptrCast(self);
+        const items_start = self_bytes + @sizeOf(Self);
+        return @ptrCast(@alignCast(items_start));
+    }
+
+    pub fn items(self: *Self, length: LengthType) []ValueType {
+        return self.itemsPtr()[0..length];
     }
 
     fn isEmpty(self: *Self) bool {
@@ -33,7 +43,7 @@ pub const Queue = extern struct {
             return false;
         }
         std.debug.print("write to queue index {}\n", .{cur_tail});
-        self.buffer[cur_tail] = value;
+        self.items(length)[cur_tail] = value;
         const next_tail = (cur_tail + 1) % length;
         @atomicStore(LengthType, &self.tail, next_tail, AtomicOrder.release);
         std.debug.print("setting tail to {}\n", .{next_tail});
@@ -56,7 +66,7 @@ pub const Queue = extern struct {
             std.debug.print("queue not empty, head: {}\n", .{cur_head});
             std.debug.unlockStdErr();
         }
-        const value: ValueType = self.buffer[cur_head];
+        const value: ValueType = self.items(length)[cur_head];
         const next_head = (cur_head + 1) % length;
         std.debug.print("setting head to {}\n", .{next_head});
         @atomicStore(LengthType, &self.head, next_head, AtomicOrder.release);

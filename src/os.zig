@@ -34,8 +34,11 @@ pub fn shm_open(allocator: std.mem.Allocator, name: []const u8, flags: std.posix
                     full_path[index] = '_';
                 }
             }
+            std.debug.print("ppp {s}\n", .{full_path});
             const fd = std.c.shm_open(path_ptr, @bitCast(flags), mode);
+            std.debug.print("before assert\n", .{});
             std.debug.assert(fd != -1);
+            std.debug.print("after open {s}\n", .{full_path});
             return @intCast(fd);
         },
         else => {
@@ -78,7 +81,7 @@ pub fn ftruncate(fd: std.posix.fd_t, length: u64) void {
             std.debug.assert(result == 0);
         },
         .macos => {
-            const result = std.c.ftruncate(fd, length);
+            const result = std.c.ftruncate(fd, @intCast(length));
             std.debug.assert(result == 0);
         },
         else => {
@@ -87,17 +90,23 @@ pub fn ftruncate(fd: std.posix.fd_t, length: u64) void {
     }
 }
 
-pub fn map(fd: std.posix.fd_t, length: usize, prot: std.posix.PROT, flags: std.posix.MAP, offset: usize) []u8 {
+pub fn mmap(fd: std.posix.fd_t, length: usize, prot: c_uint, offset: usize) []u8 {
     switch (builtin.target.os.tag) {
         .linux => {
-            const ptr = std.os.linux.mmap(null, length, prot, flags, fd, offset);
+            const flags: std.os.linux.MAP = .{
+                .TYPE = .SHARED,
+            };
+            const ptr = std.os.linux.mmap(null, length, prot, flags, fd, @intCast(offset));
             std.debug.assert(ptr != null);
             return std.mem.slice(ptr, length);
         },
         .macos => {
-            const ptr = std.c.mmap(null, length, prot, flags, fd, offset);
-            std.debug.assert(ptr != null);
-            return std.mem.slice(ptr, length);
+            const flags: std.c.MAP = .{
+                .TYPE = .SHARED,
+            };
+            const ptr_anyopaque = std.c.mmap(null, length, prot, flags, fd, @intCast(offset));
+            const arr: [*]u8 = @ptrCast(ptr_anyopaque);
+            return arr[0..length];
         },
         else => {
             std.debug.panic("mmap not implemented for this OS");

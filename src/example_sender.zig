@@ -5,7 +5,7 @@ const zipc_c = Zipc_c(1536, 64);
 // const zipc_c = Zipc_c(8, 4);
 
 pub fn main() !void {
-    var sender = zipc_c.zipc_create_sender("/my-zipc-path");
+    var sender = zipc_c.zipc_create_sender("/6");
 
     while (true) {
         std.debug.print("will send\n", .{});

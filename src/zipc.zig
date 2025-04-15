@@ -294,6 +294,7 @@ pub fn run_client() !void {
     const fd: std.os.linux.fd_t = @intCast(shm_fd);
     const null_addr: ?[*]u8 = null; // Hint to the kernel: no specific address
     const shared_memory_size: comptime_int = ZipcInstance.shared_memory_size;
+    log.debug("will mmap", .{});
     const shared_mem_pointer = switch (builtin.os.tag) {
         .linux => std.os.linux.mmap(
             null_addr,

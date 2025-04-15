@@ -56,21 +56,20 @@ pub fn Zipc_c(message_size: comptime_int, queue_size: comptime_int) type {
             }, 0o600);
             log.debug("shm_fd in sender {}", .{shm_fd});
             const fd: std.os.linux.fd_t = @intCast(shm_fd);
-            const ftruncate_result = std.os.linux.ftruncate(shm_fd, ZipcInstance.shared_memory_size);
-            std.debug.assert(ftruncate_result == 0);
-            const null_addr: ?[*]u8 = null; // Hint to the kernel: no specific address
+            log.debug("will truncate to length {}", .{ZipcInstance.shared_memory_size});
+            os.ftruncate(shm_fd, @intCast(ZipcInstance.shared_memory_size));
+            log.debug("after truncate", .{});
+            // const ftruncate_result = std.os.linux.ftruncate(shm_fd, ZipcInstance.shared_memory_size);
+            // log.debug("ftruncate result {}", .{});
+            // std.debug.assert(ftruncate_result == 0);
             const shared_memory_size: comptime_int = ZipcInstance.shared_memory_size;
-            const shared_mem_pointer = std.os.linux.mmap(
-                null_addr,
-                shared_memory_size,
-                std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
-                .{
-                    .TYPE = .SHARED,
-                },
+            const shared_memory: *align(8) [shared_memory_size]u8 = @alignCast(@ptrCast(os.mmap(
                 fd,
+                shared_memory_size,
+                std.posix.PROT.READ | std.posix.PROT.WRITE,
                 0,
-            );
-            const shared_memory: *align(8) [shared_memory_size]u8 = @ptrFromInt(shared_mem_pointer);
+            )));
+
             log.debug("sender did mmap, pointer: {*}", .{shared_memory});
 
             const ts: std.posix.timespec = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch |err| {

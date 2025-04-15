@@ -27,7 +27,7 @@ test "simple test" {
 }
 
 test "shm_open" {
-    const path: [*:0]const u8 = "/tmp/my-zipc";
+    const path: [*:0]const u8 = "/tmp/my-zipc-pahas";
     const flags: std.posix.O = .{
         .CREAT = true,
         .ACCMODE = .RDWR,
