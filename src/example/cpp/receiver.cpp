@@ -3,15 +3,18 @@
 #include <thread>
 #include "zipc.h"
 
+#define QUEUE_SIZE 64
+#define MESSAGE_SIZE 1024
+
 int main() {
     // Create a receiver
-    ZipcContext receiver = zipc_1536_64_create_receiver("/my-zipc-path");
+    ZipcContext receiver = zipc_create_receiver("/my-zipc-path", QUEUE_SIZE, MESSAGE_SIZE);
     
     // Receive data
     uint8_t *received_msg = nullptr;
     
     while(true)  {
-        uint32_t rres = zipc_1536_64_receive(&receiver, &received_msg);
+        uint32_t rres = zipc_receive(&receiver, &received_msg);
         if (rres > 0) {
             std::cout << "Received message with length: " << rres << std::endl;
         } else {

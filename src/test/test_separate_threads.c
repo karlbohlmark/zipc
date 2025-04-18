@@ -16,13 +16,16 @@
 #define TEST_MESSAGE_2 "world"
 #define TEST_MESSAGE_3 "!"
 
+#define QUEUE_SIZE 64
+#define MESSAGE_SIZE 1024
+
 
 char* receive_next_message(ZipcReceiver *receiver, uint8_t **message) {
-    int message_size = zipc_1536_64_receive(receiver, message);
+    int message_size = zipc_receive(receiver, message);
     int sleep_duration_millis = 20;
     while(message_size == 0) {
         usleep(sleep_duration_millis * 1000);
-        message_size = zipc_1536_64_receive(receiver, message);
+        message_size = zipc_receive(receiver, message);
     }
 
     
@@ -31,7 +34,7 @@ char* receive_next_message(ZipcReceiver *receiver, uint8_t **message) {
 }
 
 void* client_thread(void* arg) {
-    ZipcReceiver receiver = zipc_1536_64_create_receiver("/testar");
+    ZipcReceiver receiver = zipc_create_receiver("/testar", QUEUE_SIZE, MESSAGE_SIZE);
     uint8_t *message = NULL;
     receive_next_message(&receiver, &message);
     printf("Received message 1: %s\n", (char *)message);
@@ -60,11 +63,11 @@ void test_separate_threads() {
         perror("Failed to create thread");
         exit(EXIT_FAILURE);
     }
-    ZipcSender sender = zipc_1536_64_create_sender("/testar");
+    ZipcSender sender = zipc_create_sender("/testar", QUEUE_SIZE, MESSAGE_SIZE);
 
-    zipc_1536_64_send(&sender, (const uint8_t *)TEST_MESSAGE_1, strlen(TEST_MESSAGE_1) + 1);
-    zipc_1536_64_send(&sender, (const uint8_t *)TEST_MESSAGE_2, strlen(TEST_MESSAGE_2) + 1);
-    zipc_1536_64_send(&sender, (const uint8_t *)TEST_MESSAGE_3, strlen(TEST_MESSAGE_3) + 1);
+    zipc_send(&sender, (const uint8_t *)TEST_MESSAGE_1, strlen(TEST_MESSAGE_1) + 1);
+    zipc_send(&sender, (const uint8_t *)TEST_MESSAGE_2, strlen(TEST_MESSAGE_2) + 1);
+    zipc_send(&sender, (const uint8_t *)TEST_MESSAGE_3, strlen(TEST_MESSAGE_3) + 1);
 
     if (pthread_join(thread, NULL) != 0) {
         perror("Failed to join thread");
