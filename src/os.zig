@@ -77,7 +77,7 @@ pub fn unlink(path: [*:0]const u8) void {
 pub fn ftruncate(fd: std.posix.fd_t, length: u64) void {
     switch (builtin.target.os.tag) {
         .linux => {
-            const result = std.os.linux.ftruncate(fd, length);
+            const result = std.os.linux.ftruncate(fd, @intCast(length));
             std.debug.assert(result == 0);
         },
         .macos => {
@@ -97,8 +97,9 @@ pub fn mmap(fd: std.posix.fd_t, length: usize, prot: c_uint, offset: usize) []u8
                 .TYPE = .SHARED,
             };
             const ptr = std.os.linux.mmap(null, length, prot, flags, fd, @intCast(offset));
-            std.debug.assert(ptr != null);
-            return std.mem.slice(ptr, length);
+            std.debug.assert(ptr != 0);
+            const arr: [*]u8 = @ptrFromInt(ptr);
+            return arr[0..length];
         },
         .macos => {
             const flags: std.c.MAP = .{

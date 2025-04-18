@@ -5,9 +5,10 @@ const zipc_c = Zipc_c(1536, 64);
 const queue_size = 8;
 const message_size = 4;
 // const zipc_c = Zipc_c(8, 4);
+const zipc_path = "/my-path";
 
 pub fn main() !void {
-    var sender = Zipc_c.zipc_create_sender("/6", queue_size, message_size);
+    var sender = Zipc_c.zipc_create_sender(zipc_path, queue_size, message_size);
 
     while (true) {
         std.debug.print("will send\n", .{});
