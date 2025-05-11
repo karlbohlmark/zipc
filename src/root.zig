@@ -12,6 +12,7 @@ export fn zipc_create_sender(name: [*:0]const u8, queue_size: u32, message_size:
 }
 export fn zipc_unlink(name: [*:0]const u8) void {
     const path = zipc_shm_path(name);
+    std.debug.print("unlinking path:: {s}\n", .{path});
     const result = os.unlink(path);
     _ = result;
 }
@@ -41,6 +42,7 @@ export fn zipc_receive_blocking(receiver: *Zipc.ZipcClientReceiver, message: *[*
 }
 
 export fn zipc_shm_path(name: [*:0]const u8) [*:0]const u8 {
+    std.debug.print("zipc_shm_path: {s}\n", .{name});
     if (std.mem.len(name) == 0) {
         std.debug.print("Shared memory name must be more than 0 characters\n", .{});
         std.debug.assert(std.mem.len(name) > 0);
@@ -49,9 +51,10 @@ export fn zipc_shm_path(name: [*:0]const u8) [*:0]const u8 {
         std.debug.print("Shared memory name must start with a '/'\n", .{});
         std.debug.assert(name[0] == '/');
     }
-    const full_path = std.mem.concat(std.heap.page_allocator, u8, &[_][]const u8{ "/dev/shm", std.mem.span(name), "\x00"[0..1] }) catch |err| {
+
+    const full_path = std.fs.path.joinZ(std.heap.page_allocator, &.{ "/dev/shm", std.mem.span(name) }) catch |err| {
         std.debug.print("failed to concat path: {}\n", .{err});
         std.process.exit(1);
     };
-    return @ptrCast(full_path.ptr);
+    return full_path;
 }

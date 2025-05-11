@@ -3,7 +3,7 @@ const Zipc_c = @import("./zipc_c.zig");
 const queue_size = 8;
 const message_size = 4;
 // const zipc_c = Zipc_c(8, 4);
-const zipc_path = "/my-path";
+const zipc_path = "/my-zipc-path";
 pub fn main() !void {
     var receiver = Zipc_c.zipc_create_receiver(zipc_path, queue_size, message_size);
 

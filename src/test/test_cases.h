@@ -8,7 +8,7 @@
 
 static TestCase test_cases[] = {
     {"single_thread_lock_step", test_single_thread_lock_step},
-    // {"separate_threads", test_separate_threads},
+    {"separate_threads", test_separate_threads},
 };
 
 #endif // TEST_CASES_H

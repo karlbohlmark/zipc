@@ -20,13 +20,18 @@
 #define ZipcReceiver ZipcContext
 
 void test_single_thread_lock_step() {
+    printf("test_single_thread_lock_step will unlink\n");
     zipc_unlink("/testar");
+    printf("Did unlink\n");
     ZipcSender sender = zipc_create_sender("/testar", QUEUE_SIZE, MESSAGE_SIZE);
     ZipcReceiver receiver = zipc_create_receiver("/testar", QUEUE_SIZE, MESSAGE_SIZE);
+    printf("Created sender and receiver\n");
     uint8_t *message = NULL;
     int message_size = 0;
     message_size = zipc_receive(&receiver, &message);
     assert(message == NULL);
+
+    printf("Did first receive\n");  
 
     zipc_send(&sender, (const uint8_t *)TEST_MESSAGE_1, strlen(TEST_MESSAGE_1) + 1);
     message_size = zipc_receive(&receiver, &message);
