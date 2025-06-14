@@ -13,6 +13,16 @@ pub fn build(b: *std.Build) void {
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
 
+    // Create a mutable copy of the target's query
+    var modified_target_query = target.query;
+    // If the target is aarch64, set cpu_model to cortex_a53
+    if (modified_target_query.cpu_arch == .aarch64) {
+        std.debug.print("setting target cpu model to cortext a53", .{});
+        modified_target_query.cpu_model = .{ .explicit = &std.Target.aarch64.cpu.cortex_a53 };
+    }
+    // Resolve the modified target query
+    const final_target = b.resolveTargetQuery(modified_target_query);
+
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
@@ -25,7 +35,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .optimize = optimize,
-            .target = target,
+            .target = final_target,
             .pic = true,
         }),
     });
