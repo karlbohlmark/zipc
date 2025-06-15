@@ -4,15 +4,14 @@ const Zipc_c = @import("./zipc_c.zig");
 const constants = @import("./constants.zig");
 const os = @import("./os.zig");
 
-export fn zipc_create_receiver(name: [*:0]const u8, queue_size: u32, message_size: u32) Zipc.ZipcClientReceiver {
-    return Zipc_c.zipc_create_receiver(name, queue_size, message_size);
+export fn zipc_create_receiver(name: [*:0]const u8, message_size: u32, queue_size: u32) Zipc.ZipcClientReceiver {
+    return Zipc_c.zipc_create_receiver(name, message_size, queue_size);
 }
-export fn zipc_create_sender(name: [*:0]const u8, queue_size: u32, message_size: u32) Zipc.ZipcServerSender {
-    return Zipc_c.zipc_create_sender(name, queue_size, message_size);
+export fn zipc_create_sender(name: [*:0]const u8, message_size: u32, queue_size: u32) Zipc.ZipcServerSender {
+    return Zipc_c.zipc_create_sender(name, message_size, queue_size);
 }
 export fn zipc_unlink(name: [*:0]const u8) void {
     const path = zipc_shm_path(name);
-    std.debug.print("unlinking path:: {s}\n", .{path});
     const result = os.unlink(path);
     _ = result;
 }
@@ -42,7 +41,6 @@ export fn zipc_receive_blocking(receiver: *Zipc.ZipcClientReceiver, message: *[*
 }
 
 export fn zipc_shm_path(name: [*:0]const u8) [*:0]const u8 {
-    std.debug.print("zipc_shm_path: {s}\n", .{name});
     if (std.mem.len(name) == 0) {
         std.debug.print("Shared memory name must be more than 0 characters\n", .{});
         std.debug.assert(std.mem.len(name) > 0);

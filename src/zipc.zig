@@ -89,7 +89,7 @@ pub const ZipcServerSender = extern struct {
         // std.debug.dumpHex(shared_mem_ptr[0..shared_memory_size]);
         // std.debug.unlockStdErr();
         const queue_byte_size: usize = queueByteSize(queue_size);
-        const buffers_bytes_size: usize = @intCast(message_size * queue_size);
+        const buffers_bytes_size: usize = @as(usize, message_size) * @as(usize, queue_size);
         const init_flag_ptr_int: usize = @intFromPtr(shared_mem_ptr) + queue_byte_size + buffers_bytes_size;
         const init_flag_ptr: *i32 = @ptrFromInt(init_flag_ptr_int);
         // log.debug("init_flag value before init: {}", .{init_flag_ptr.*});
@@ -223,7 +223,7 @@ pub const ZipcClientReceiver = extern struct {
         std.mem.copyForwards(u8, dest_name[0..name_slice.len], name_slice);
         dest_name[name_slice.len] = 0;
         const queue_byte_size: usize = queueByteSize(queue_size);
-        const buffers_bytes_size: usize = @intCast(message_size * queue_size);
+        const buffers_bytes_size: usize = @as(usize, message_size) * @as(usize, queue_size);
         return .{
             .client_id = client_id,
             .connection_mode = ZipcConnectionMode.Client,
@@ -264,7 +264,7 @@ pub const ZipcClientReceiver = extern struct {
 
 pub fn getSharedMemorySize(queue_size: QueueLengthType, message_size: u32) usize {
     // // pub const shared_memory_size = @sizeOf(queue.Queue) + queue_size_param * @sizeOf(queue.ValueType) + message_size_param * queue_size_param + @sizeOf(i32);
-    const shared_memory_size = @sizeOf(queue.Queue) + queueByteSize(queue_size) + queue_size * message_size + @sizeOf(i32);
+    const shared_memory_size = @sizeOf(queue.Queue) + queueByteSize(queue_size) + @as(usize, queue_size) * @as(usize, message_size) + @sizeOf(i32);
     return shared_memory_size;
 }
 

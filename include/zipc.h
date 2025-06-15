@@ -32,8 +32,8 @@ typedef struct {
 extern "C" {
 #endif
 
-ZipcContext zipc_create_receiver(const char *name, size_t max_message_size, size_t queue_size);
-ZipcContext zipc_create_sender(const char *name, size_t max_message_size, size_t queue_size);
+ZipcContext zipc_create_receiver(const char *name, uint32_t max_message_size, uint32_t queue_size);
+ZipcContext zipc_create_sender(const char *name, uint32_t max_message_size, uint32_t queue_size);
 
 void zipc_unlink(const char *name);
 
