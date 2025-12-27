@@ -28,6 +28,7 @@ jobs:
         uses: mlugg/setup-zig@v1
         with:
           version: 0.15.2
+          use-official: true
 
       - name: Build
         run: zig build
@@ -56,6 +57,7 @@ jobs:
         uses: mlugg/setup-zig@v1
         with:
           version: 0.15.2
+          use-official: true
 
       - name: Build for ${{ matrix.target }}
         run: zig build -Dtarget=${{ matrix.target }}
