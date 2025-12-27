@@ -71,7 +71,7 @@ pub const ZipcServerSender = extern struct {
         _ = self.queue.enqueue(self.params.queue_size, message.len);
 
         if (builtin.target.os.tag == .linux) {
-            const wake_return_val = std.os.linux.futex_wake(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAKE, 1);
+            const wake_return_val = std.os.linux.futex_3arg(@ptrCast(&self.queue.tail), .{ .cmd = .WAKE, .private = false }, 1);
             log.debug("wake_return_val: {}", .{wake_return_val});
         }
     }
@@ -189,7 +189,7 @@ pub const ZipcClientReceiver = extern struct {
                 .nsec = @intCast((@as(u32, @intCast(timeout_ms)) % 1000) * 1_000_000),
             };
             if (builtin.target.os.tag == .linux) {
-                const futex_return_value = std.os.linux.futex_wait(@ptrCast(&self.queue.tail), std.os.linux.FUTEX.WAIT, @intCast(current_tail), &timeout_timespec);
+                const futex_return_value = std.os.linux.futex_4arg(@ptrCast(&self.queue.tail), .{ .cmd = .WAIT, .private = false }, @intCast(current_tail), &timeout_timespec);
                 if (futex_return_value != 0) {
                     log.debug("futex_wait failed: {}", .{futex_return_value});
                 }
@@ -303,7 +303,7 @@ pub fn run_client() !void {
     }, 0o600);
     const fd: std.os.linux.fd_t = @intCast(shm_fd);
     const null_addr: ?[*]u8 = null; // Hint to the kernel: no specific address
-    const shared_memory_size: comptime_int = getSharedMemorySize(queue_size, message_size);
+    const shared_memory_size = getSharedMemorySize(queue_size, message_size);
     log.debug("will mmap", .{});
     const shared_mem_pointer = switch (builtin.os.tag) {
         .linux => std.os.linux.mmap(
@@ -332,9 +332,15 @@ pub fn run_client() !void {
     var ipc_client = initClient(
         socket_name,
         @ptrCast(@alignCast(shared_memory[0..shared_memory_size].ptr)),
+        queue_size,
+        message_size,
+        0, // client_id
     );
-    const index, const message_slice = ipc_client.receive();
-    log.debug("received index {} and slice with length {}: {X}", .{ index, message_slice.len, message_slice });
+    const result = ipc_client.receive();
+    if (result) |r| {
+        const index, const message_slice = r;
+        log.debug("received index {} and slice with length {}: {X}", .{ index, message_slice.len, message_slice });
+    }
 }
 
 test "client server connection test" {
@@ -344,7 +350,7 @@ test "client server connection test" {
     const queue_size = 128;
 
     const socket_name = "/well-known-server-name";
-    const shared_memory_size: comptime_int = getSharedMemorySize(queue_size, message_size);
+    const shared_memory_size = getSharedMemorySize(queue_size, message_size);
     const shm_fd = os.shm_open(allocator, socket_name, .{
         .CREAT = true,
         .ACCMODE = .RDWR,
@@ -354,24 +360,20 @@ test "client server connection test" {
     const fd: std.posix.fd_t = @intCast(shm_fd);
     os.ftruncate(shm_fd, shared_memory_size);
 
-    const null_addr: ?[*]u8 = null; // Hint to the kernel: no specific address
-    const shared_mem_pointer = os.mmap(
-        null_addr,
+    const shared_mem_slice = os.mmap(
+        fd,
         shared_memory_size,
         std.posix.PROT.READ | std.posix.PROT.WRITE,
-        .{
-            .TYPE = .SHARED,
-        },
-        fd,
         0,
     );
-    // check if mmap was successful
-    std.debug.assert(shared_mem_pointer != @intFromPtr(std.c.MAP_FAILED));
-    const shared_memory: [*]align(8) u8 = @ptrFromInt(shared_mem_pointer);
+    const shared_memory: [*]align(8) u8 = @alignCast(shared_mem_slice.ptr);
     shared_memory[0] = 0;
     var server_sender = initServerSenderWithBuffer(
         socket_name,
         @ptrCast(@alignCast(shared_memory[0..shared_memory_size].ptr)),
+        queue_size,
+        message_size,
+        0, // server_id
     );
     const some_data = try allocator.alloc(u8, 20);
     some_data[0] = 1;
