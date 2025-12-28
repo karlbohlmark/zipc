@@ -28,6 +28,9 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    // Strip option to remove debug symbols
+    const strip = b.option(bool, "strip", "Strip debug symbols from the binary") orelse false;
+
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "zipc",
@@ -38,6 +41,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .target = final_target,
             .pic = true,
+            .strip = strip,
         }),
     });
     lib.bundle_compiler_rt = true;
