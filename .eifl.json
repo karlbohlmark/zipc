@@ -3,7 +3,7 @@
   "steps": [
     {
       "name": "Build",
-      "run": "zig build -Doptimize=ReleaseSafe",
+      "run": "zig build -Doptimize=ReleaseSafe -Dstrip=true",
       "capture_sizes": ["zig-out/lib/libzipc.a"]
     },
     {
