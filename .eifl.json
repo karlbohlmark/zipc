@@ -3,7 +3,8 @@
   "steps": [
     {
       "name": "Build",
-      "run": "zig build"
+      "run": "zig build",
+      "capture_sizes": ["zig-out/lib/libzipc.a"]
     },
     {
       "name": "Test",
