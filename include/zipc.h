@@ -32,20 +32,20 @@ typedef struct {
 extern "C" {
 #endif
 
-ZipcContext zipc_1536_64_create_receiver(const char *name);
-ZipcContext zipc_1536_64_create_sender(const char *name);
+ZipcContext zipc_create_receiver(const char *name, uint32_t max_message_size, uint32_t queue_size);
+ZipcContext zipc_create_sender(const char *name, uint32_t max_message_size, uint32_t queue_size);
+
 void zipc_unlink(const char *name);
 
-void zipc_1536_64_send(ZipcContext *sender, const uint8_t *message, size_t message_size);
-uint32_t zipc_1536_64_receive(ZipcContext *receiver, uint8_t **message);
+void zipc_send(ZipcContext *sender, const uint8_t *message, size_t message_size);
+uint32_t zipc_receive(ZipcContext *receiver, uint8_t **message);
 
-uint32_t zipc_1536_64_receive_blocking(ZipcContext *receiver, uint8_t **message, uint16_t timeout_millis);
-
-size_t zipc_1536_64_receiver_wait_for_initialization(ZipcContext *receiver);
+uint32_t zipc_receive_blocking(ZipcContext *receiver, uint8_t **message, uint16_t timeout_millis);
 
 char* zipc_shm_path(const char *name);
 
 #ifdef __cplusplus
 }
 #endif
+
 #endif // LIB_ZIPC_H

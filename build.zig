@@ -13,19 +13,30 @@ pub fn build(b: *std.Build) void {
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
 
+    // Create a mutable copy of the target's query
+    var modified_target_query = target.query;
+    // If the target is aarch64, set cpu_model to cortex_a53
+    if (modified_target_query.cpu_arch == .aarch64) {
+        std.debug.print("setting target cpu model to cortext a53", .{});
+        modified_target_query.cpu_model = .{ .explicit = &std.Target.aarch64.cpu.cortex_a53 };
+    }
+    // Resolve the modified target query
+    const final_target = b.resolveTargetQuery(modified_target_query);
+
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
+        .linkage = .static,
         .name = "zipc",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .optimize = optimize,
-            .target = target,
+            .target = final_target,
             .pic = true,
         }),
     });
@@ -81,17 +92,21 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "zipc",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     b.installArtifact(exe);
 
     // c++ receiver example
     const cpp_receiver = b.addExecutable(.{
         .name = "cpp_receiver",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     cpp_receiver.addCSourceFiles(.{
         .root = b.path("src/example/cpp"),
@@ -110,8 +125,10 @@ pub fn build(b: *std.Build) void {
     // c++ sender example
     const cpp_sender = b.addExecutable(.{
         .name = "cpp_sender",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     cpp_sender.addCSourceFiles(.{
         .root = b.path("src/example/cpp"),
@@ -129,8 +146,10 @@ pub fn build(b: *std.Build) void {
 
     const c_test = b.addExecutable(.{
         .name = "c_test",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     c_test.addCSourceFiles(.{
         .root = b.path("src/test"),
@@ -155,9 +174,11 @@ pub fn build(b: *std.Build) void {
     // Add receiver executable
     const receiver = b.addExecutable(.{
         .name = "receiver",
-        .root_source_file = b.path("src/example_receiver.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/example_receiver.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     b.installArtifact(receiver);
     receiver.linkLibrary(lib);
@@ -165,9 +186,11 @@ pub fn build(b: *std.Build) void {
     // Add sender executable
     const sender = b.addExecutable(.{
         .name = "sender",
-        .root_source_file = b.path("src/example_sender.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/example_sender.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     b.installArtifact(sender);
 
@@ -213,18 +236,23 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
+    exe_unit_tests.linkLibC();
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

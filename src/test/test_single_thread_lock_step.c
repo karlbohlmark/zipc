@@ -13,33 +13,41 @@
 #define TEST_MESSAGE_2 "world"
 #define TEST_MESSAGE_3 "!"
 
+#define QUEUE_SIZE 64
+#define MESSAGE_SIZE 1024
+
 #define ZipcSender ZipcContext
 #define ZipcReceiver ZipcContext
 
 void test_single_thread_lock_step() {
+    printf("test_single_thread_lock_step will unlink\n");
     zipc_unlink("/testar");
-    ZipcSender sender = zipc_1536_64_create_sender("/testar");
-    ZipcReceiver receiver = zipc_1536_64_create_receiver("/testar");
+    printf("Did unlink\n");
+    ZipcSender sender = zipc_create_sender("/testar", QUEUE_SIZE, MESSAGE_SIZE);
+    ZipcReceiver receiver = zipc_create_receiver("/testar", QUEUE_SIZE, MESSAGE_SIZE);
+    printf("Created sender and receiver\n");
     uint8_t *message = NULL;
     int message_size = 0;
-    message_size = zipc_1536_64_receive(&receiver, &message);
+    message_size = zipc_receive(&receiver, &message);
     assert(message == NULL);
 
-    zipc_1536_64_send(&sender, (const uint8_t *)TEST_MESSAGE_1, strlen(TEST_MESSAGE_1) + 1);
-    message_size = zipc_1536_64_receive(&receiver, &message);
+    printf("Did first receive\n");  
+
+    zipc_send(&sender, (const uint8_t *)TEST_MESSAGE_1, strlen(TEST_MESSAGE_1) + 1);
+    message_size = zipc_receive(&receiver, &message);
     assert(message != NULL);
     assert(strcmp((char *)message, TEST_MESSAGE_1) == 0);
     message = NULL;
 
-    zipc_1536_64_send(&sender, (const uint8_t *)TEST_MESSAGE_2, strlen(TEST_MESSAGE_2) + 1);
-    message_size = zipc_1536_64_receive(&receiver, &message);
+    zipc_send(&sender, (const uint8_t *)TEST_MESSAGE_2, strlen(TEST_MESSAGE_2) + 1);
+    message_size = zipc_receive(&receiver, &message);
     assert(message != NULL);
     assert(message_size == strlen(TEST_MESSAGE_2) + 1);
     message = NULL;
 
 
-    zipc_1536_64_send(&sender, (const uint8_t *)TEST_MESSAGE_3, strlen(TEST_MESSAGE_3) + 1);
-    message_size = zipc_1536_64_receive(&receiver, &message);
+    zipc_send(&sender, (const uint8_t *)TEST_MESSAGE_3, strlen(TEST_MESSAGE_3) + 1);
+    message_size = zipc_receive(&receiver, &message);
     assert(message != NULL);
     assert(message_size == strlen(TEST_MESSAGE_3) + 1);
     message = NULL;
