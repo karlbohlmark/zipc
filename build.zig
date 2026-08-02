@@ -157,7 +157,7 @@ pub fn build(b: *std.Build) void {
     });
     c_test.addCSourceFiles(.{
         .root = b.path("src/test"),
-        .files = &.{ "test.c", "test_separate_threads.c", "test_single_thread_lock_step.c" },
+        .files = &.{ "test.c", "test_separate_threads.c", "test_single_thread_lock_step.c", "test_full_queue.c" },
     });
     const config_header = b.addConfigHeader(.{
         .include_path = "zipc_test_config.h",

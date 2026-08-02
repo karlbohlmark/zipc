@@ -32,21 +32,40 @@ pub const Queue = extern struct {
         return self.head == self.tail;
     }
 
-    pub fn enqueue(self: *Self, length: LengthType, value: ValueType) bool {
+    /// Claims the next slot for the producer, or returns null if the queue is
+    /// full. Nothing is published until the matching commit().
+    ///
+    /// Callers must reserve before writing into the slot's message buffer, not
+    /// after. The ring keeps one slot unused, and when the queue is full that
+    /// slot is precisely the one the consumer was most recently handed by
+    /// dequeue() - writing into it speculatively would corrupt a message that
+    /// has already been delivered.
+    ///
+    /// The acquire on `head` pairs with the consumer's release in dequeue(),
+    /// so the consumer's reads of the previous occupant of this slot are
+    /// ordered before the writes the producer is about to make.
+    pub fn reserve(self: *Self, length: LengthType) ?LengthType {
         const cur_tail = self.tail; // tail is owned by the producer
-        // std.debug.print("cur_tail {}\n", .{cur_tail});
         const cur_head = @atomicLoad(LengthType, &self.head, AtomicOrder.acquire);
-        // std.debug.print("cur_head (seen by sender) {}\n", .{cur_head});
         if ((cur_tail + 1) % length == cur_head) {
             // Full
-            // std.debug.print("queue full\n", .{});
-            return false;
+            return null;
         }
-        // std.debug.print("write to queue index {}\n", .{cur_tail});
-        self.items(length)[cur_tail] = value;
-        const next_tail = (cur_tail + 1) % length;
+        return cur_tail;
+    }
+
+    /// Publishes the slot returned by the preceding reserve(). The release
+    /// pairs with the consumer's acquire on `tail` in dequeue(), making the
+    /// producer's writes to the message buffer visible to the consumer.
+    pub fn commit(self: *Self, length: LengthType, index: LengthType, value: ValueType) void {
+        self.items(length)[index] = value;
+        const next_tail = (index + 1) % length;
         @atomicStore(LengthType, &self.tail, next_tail, AtomicOrder.release);
-        // std.debug.print("setting tail to {}\n", .{next_tail});
+    }
+
+    pub fn enqueue(self: *Self, length: LengthType, value: ValueType) bool {
+        const index = self.reserve(length) orelse return false;
+        self.commit(length, index, value);
         return true;
     }
 
