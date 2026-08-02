@@ -118,6 +118,20 @@ bool zipc_send(ZipcContext *sender, const uint8_t *message, size_t message_size)
  *
  * Checks the queue for available messages and returns immediately.
  *
+ * The message is not copied: *message points into the shared memory segment,
+ * at the slot the sender wrote it to.
+ *
+ * LIFETIME: the returned pointer is valid until the next zipc_receive() or
+ * zipc_receive_blocking() call on this context. Copy the data out before that
+ * call if you need to keep it. The sender cannot reclaim the slot while you
+ * hold it - it reports a full queue instead - but your next receive releases
+ * it, after which the sender may overwrite it at any time.
+ *
+ * This makes the common "handle each message, then ask for the next one" loop
+ * safe with no copy. It does NOT make it safe to collect several pointers
+ * before processing them, or to hand a pointer to another thread that may
+ * outlive the next receive call. Both need a copy.
+ *
  * @param receiver Pointer to receiver context
  * @param message Output: pointer to received message data (points into shared memory)
  * @return Message size in bytes, or 0 if queue is empty
@@ -129,6 +143,9 @@ uint32_t zipc_receive(ZipcContext *receiver, uint8_t **message);
  *
  * Waits for a message with the specified timeout. Uses futex on Linux
  * for efficient waiting, or polling on other platforms.
+ *
+ * The message is not copied and the returned pointer has the same lifetime as
+ * for zipc_receive(): valid until the next receive call on this context.
  *
  * @param receiver Pointer to receiver context
  * @param message Output: pointer to received message data (points into shared memory)

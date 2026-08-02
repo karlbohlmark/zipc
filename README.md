@@ -82,6 +82,10 @@ pub const ZipcClientReceiver = extern struct {
 | `dumpHex() void` | Debug: dumps the shared memory contents as hex. |
 | `dumpQueueHex() void` | Debug: dumps the queue structure as hex. |
 
+The slice returned by `receive` / `receive_blocking` points into shared memory and is
+valid until the **next** receive call on that receiver. See
+[pointer lifetime](#zipc_receive) under the C API — the rule is the same for both.
+
 #### `ZipcParams`
 
 Configuration parameters for the IPC channel.
@@ -287,6 +291,37 @@ Non-blocking receive. Checks the queue and returns immediately.
 
 **Returns:** Message size in bytes, or `0` if no message is available.
 
+**Pointer lifetime:** the message is not copied — `*message` points into the shared
+memory segment. It stays valid until your **next** `zipc_receive` or
+`zipc_receive_blocking` call on this context; copy the data out before that call if
+you need to keep it.
+
+While you hold the pointer the sender cannot reclaim the slot: the ring keeps one
+slot unused, and that slot is the one you were just handed, so the sender reports a
+full queue rather than overwriting you. Your next receive advances `head` and
+releases it, after which the sender may overwrite it at any time.
+
+This means the usual loop — handle a message, then ask for the next one — is safe
+with no copy:
+
+```c
+uint8_t *msg;
+uint32_t len;
+while ((len = zipc_receive_blocking(&receiver, &msg, 500)) > 0) {
+    handle(msg, len);   // done with msg before the next receive: no copy needed
+}
+```
+
+These are **not** safe and need a copy:
+
+```c
+/* collecting pointers before processing them */
+for (int i = 0; i < n; i++) zipc_receive(&receiver, &batch[i]);  /* WRONG */
+
+/* handing a pointer to something that outlives the next receive */
+queue_work(msg);                                                 /* WRONG */
+```
+
 ---
 
 #### `zipc_receive_blocking`
@@ -303,6 +338,9 @@ Blocking receive with timeout. Waits for a message using futex (Linux) or pollin
 - `timeout_millis`: Maximum time to wait in milliseconds (must be < 1000)
 
 **Returns:** Message size in bytes, or `0` if timeout occurred.
+
+**Pointer lifetime:** same as [`zipc_receive`](#zipc_receive) — the returned pointer is
+valid until the next receive call on this context.
 
 ---
 

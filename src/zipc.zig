@@ -199,6 +199,18 @@ pub const ZipcClientReceiver = extern struct {
         return self.buffers[index * self.params.message_size ..][0..len];
     }
 
+    /// Returns the slot index and a slice pointing into shared memory. The
+    /// message is not copied.
+    ///
+    /// The slice is valid until the next receive() or receive_blocking() call
+    /// on this receiver. Until then `head` does not move, so the producer's
+    /// reserve() cannot hand this slot back out and it reports a full queue
+    /// instead of lapping the reader. The next receive releases the slot, and
+    /// the producer may overwrite it from that point on.
+    ///
+    /// So processing a message before asking for the next one needs no copy;
+    /// retaining the slice past the next receive - collecting a batch of them,
+    /// or passing one to another thread - does.
     pub fn receive(self: *Self) ?struct { QueueLengthType, []u8 } {
         var current_tail: QueueLengthType = 0;
         if (self.queue.dequeue(self.params.queue_size, &current_tail)) |item| {
@@ -210,6 +222,9 @@ pub const ZipcClientReceiver = extern struct {
         }
     }
 
+    /// Waits up to `timeout_ms` for a message. The returned slice has the same
+    /// lifetime as receive()'s: valid until the next receive call on this
+    /// receiver.
     pub fn receive_blocking(self: *Self, timeout_ms: u16) ?struct { QueueLengthType, []u8 } {
         // self.dumpHex();
         if (timeout_ms >= 1000) {
