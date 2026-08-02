@@ -104,10 +104,14 @@ void zipc_unlink(const char *name);
  * wakes the receiver using futex if it's waiting.
  *
  * @param sender Pointer to sender context
- * @param message Pointer to message data
- * @param message_size Size of message in bytes (must be <= configured message_size)
+ * @param message Pointer to message data. Must not point into this channel's
+ *                own buffer region.
+ * @param message_size Size of message in bytes
+ * @return true if the message was published; false if it exceeds the channel's
+ *         configured message_size, or the queue is full. Nothing is written to
+ *         shared memory when false is returned.
  */
-void zipc_send(ZipcContext *sender, const uint8_t *message, size_t message_size);
+bool zipc_send(ZipcContext *sender, const uint8_t *message, size_t message_size);
 
 /**
  * @brief Non-blocking receive

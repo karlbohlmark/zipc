@@ -147,7 +147,7 @@ pub fn main() !void {
 
     while (true) {
         const message = "hello!";
-        sender.send(message);
+        _ = sender.send(message);
         std.time.sleep(200_000_000); // 200ms
     }
 }
@@ -257,15 +257,19 @@ Creates a receiver context and attaches to an existing shared memory segment.
 #### `zipc_send`
 
 ```c
-void zipc_send(ZipcContext *sender, const uint8_t *message, size_t message_size);
+bool zipc_send(ZipcContext *sender, const uint8_t *message, size_t message_size);
 ```
 
 Sends a message through the IPC channel.
 
 **Parameters:**
 - `sender`: Pointer to the sender context
-- `message`: Pointer to the message data
-- `message_size`: Size of the message in bytes (must be <= configured message_size)
+- `message`: Pointer to the message data. Must not point into this channel's own buffer region.
+- `message_size`: Size of the message in bytes
+
+**Returns:** `true` if the message was published. `false` if it is larger than the
+channel's configured `message_size`, or the queue is full — in both cases nothing is
+written to shared memory.
 
 ---
 

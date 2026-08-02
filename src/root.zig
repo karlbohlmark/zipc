@@ -15,9 +15,9 @@ export fn zipc_unlink(name: [*:0]const u8) void {
     const result = os.unlink(path);
     _ = result;
 }
-export fn zipc_send(sender: *Zipc.ZipcServerSender, message: [*]const u8, message_size: usize) void {
+export fn zipc_send(sender: *Zipc.ZipcServerSender, message: [*]const u8, message_size: usize) bool {
     const message_slice: []const u8 = message[0..message_size];
-    sender.send(message_slice);
+    return sender.send(message_slice);
 }
 export fn zipc_receive(receiver: *Zipc.ZipcClientReceiver, message: *[*]allowzero const u8) usize {
     if (receiver.receive()) |item| {
