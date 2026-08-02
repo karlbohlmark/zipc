@@ -11,7 +11,9 @@ pub fn main() !void {
     while (true) {
         std.debug.print("will send\n", .{});
         const message = "hello!";
-        sender.send(message);
+        if (!sender.send(message)) {
+            std.debug.print("send rejected (too large, or queue full)\n", .{});
+        }
         _ = os.nanosleep(0, 200_000_000);
     }
 }
