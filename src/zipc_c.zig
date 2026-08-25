@@ -21,7 +21,7 @@ pub fn zipc_create_receiver(name: [*:0]const u8, queue_size: u32, message_size: 
     const shared_mem_pointer = std.os.linux.mmap(
         null_addr,
         shared_memory_size,
-        std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
+        .{ .READ = true, .WRITE = true },
         .{
             .TYPE = .SHARED,
         },
@@ -36,10 +36,7 @@ pub fn zipc_create_receiver(name: [*:0]const u8, queue_size: u32, message_size: 
     // std.debug.dumpHex(shared_memory[0..shared_memory_size]);
     // std.debug.unlockStdErr();
 
-    const ts: std.posix.timespec = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch |err| {
-        log.debug("clock_gettime failed: {}", .{err});
-        std.process.exit(1);
-    };
+    const ts: std.posix.timespec = os.clockGettimeMonotonic();
     const client_id: u64 = getIdentifyFromPidAndTime(std.os.linux.getpid(), ts);
     return Zipc.initClient(name_slice, shared_memory, queue_size, message_size, client_id);
 }
@@ -60,19 +57,16 @@ pub fn zipc_create_sender(name: [*:0]const u8, queue_size: u32, message_size: u3
     // const ftruncate_result = std.os.linux.ftruncate(shm_fd, shared_memory_size);
     // log.debug("ftruncate result {}", .{});
     // std.debug.assert(ftruncate_result == 0);
-    const shared_memory: [*]align(8) u8 = @alignCast(@ptrCast(os.mmap(
+    const shared_memory: [*]align(8) u8 = @ptrCast(@alignCast(os.mmap(
         fd,
         shared_memory_size,
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .READ = true, .WRITE = true },
         0,
     )));
 
     log.debug("sender did mmap, pointer: {*}", .{shared_memory});
 
-    const ts: std.posix.timespec = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch |err| {
-        log.debug("clock_gettime failed: {}", .{err});
-        std.process.exit(1);
-    };
+    const ts: std.posix.timespec = os.clockGettimeMonotonic();
     const pid = os.getpid();
     const server_id: u64 = getIdentifyFromPidAndTime(pid, ts);
     // const control_socket_fd = bindUnixSocket(name_slice);
