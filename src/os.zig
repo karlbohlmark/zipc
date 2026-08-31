@@ -44,7 +44,7 @@ pub fn unlink(path: [*:0]const u8) void {
         .linux => {
             std.debug.print("unlinking path:: {s}\n", .{path});
             const result = std.os.linux.unlink(path);
-            const err = std.os.linux.E.init(result);
+            const err = std.os.linux.errno(result);
             if (result != 0) {
                 if (err == std.os.linux.E.NOENT) {
                     std.debug.print("unlink: file not found, ignoring\n", .{});
@@ -95,7 +95,7 @@ pub fn ftruncate(fd: std.posix.fd_t, length: u64) void {
     }
 }
 
-pub fn mmap(fd: std.posix.fd_t, length: usize, prot: c_uint, offset: usize) []u8 {
+pub fn mmap(fd: std.posix.fd_t, length: usize, prot: std.posix.PROT, offset: usize) []u8 {
     switch (builtin.target.os.tag) {
         .linux => {
             const flags: std.os.linux.MAP = .{
@@ -142,6 +142,30 @@ pub fn nanosleep(sec: u64, nsec: u32) void {
             std.debug.panic("nanosleep not implemented for this OS");
         },
     }
+}
+
+pub fn clockGettimeMonotonic() std.posix.timespec {
+    var ts: std.posix.timespec = undefined;
+    switch (builtin.target.os.tag) {
+        .linux => {
+            const result = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+            std.debug.assert(result == 0);
+        },
+        .macos => {
+            const result = std.c.clock_gettime(.MONOTONIC, &ts);
+            std.debug.assert(result == 0);
+        },
+        else => {
+            std.debug.panic("clock_gettime not implemented for this OS");
+        },
+    }
+    return ts;
+}
+
+/// Milliseconds off the monotonic clock, for measuring elapsed time.
+pub fn monotonicMillis() i64 {
+    const ts = clockGettimeMonotonic();
+    return @as(i64, ts.sec) * std.time.ms_per_s + @divFloor(@as(i64, ts.nsec), std.time.ns_per_ms);
 }
 
 pub fn getpid() i32 {

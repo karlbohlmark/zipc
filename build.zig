@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
     });
     lib.bundle_compiler_rt = true;
     if (target.result.os.tag.isDarwin()) {
-        lib.linkLibC();
+        lib.root_module.link_libc = true;
     }
     // const config_header = b.addConfigHeader(.{
     //     .include_path = "zipc_config.h",
@@ -110,17 +110,17 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libcpp = true,
         }),
     });
-    cpp_receiver.addCSourceFiles(.{
+    cpp_receiver.root_module.addCSourceFiles(.{
         .root = b.path("src/example/cpp"),
         .files = &.{
             "receiver.cpp",
         },
     });
-    cpp_receiver.linkLibrary(lib);
-    cpp_receiver.addIncludePath(b.path("include"));
-    cpp_receiver.linkLibCpp();
+    cpp_receiver.root_module.linkLibrary(lib);
+    cpp_receiver.root_module.addIncludePath(b.path("include"));
     b.installArtifact(cpp_receiver);
     const run_cpp_receiver = b.addRunArtifact(cpp_receiver);
     const run_cpp_receiver_step = b.step("run-c++-receiver", "Run c++ receiver example");
@@ -132,17 +132,17 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libcpp = true,
         }),
     });
-    cpp_sender.addCSourceFiles(.{
+    cpp_sender.root_module.addCSourceFiles(.{
         .root = b.path("src/example/cpp"),
         .files = &.{
             "sender.cpp",
         },
     });
-    cpp_sender.linkLibrary(lib);
-    cpp_sender.addIncludePath(b.path("include"));
-    cpp_sender.linkLibCpp();
+    cpp_sender.root_module.linkLibrary(lib);
+    cpp_sender.root_module.addIncludePath(b.path("include"));
     b.installArtifact(cpp_sender);
     const run_cpp_sender = b.addRunArtifact(cpp_sender);
     const run_cpp_sender_step = b.step("run-c++-sender", "Run c++ sender example");
@@ -153,9 +153,10 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
-    c_test.addCSourceFiles(.{
+    c_test.root_module.addCSourceFiles(.{
         .root = b.path("src/test"),
         .files = &.{ "test.c", "test_separate_threads.c", "test_single_thread_lock_step.c", "test_full_queue.c" },
     });
@@ -167,10 +168,9 @@ pub fn build(b: *std.Build) void {
         .ZIPC_QUEUE_SIZE = QUEUE_SIZE,
     });
 
-    c_test.linkLibrary(lib);
-    c_test.addConfigHeader(config_header);
-    c_test.addIncludePath(b.path("include"));
-    c_test.linkLibC();
+    c_test.root_module.linkLibrary(lib);
+    c_test.root_module.addConfigHeader(config_header);
+    c_test.root_module.addIncludePath(b.path("include"));
     const run_c_tests = b.addRunArtifact(c_test);
 
     b.installArtifact(c_test);
@@ -185,7 +185,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(receiver);
-    receiver.linkLibrary(lib);
+    receiver.root_module.linkLibrary(lib);
 
     // Add sender executable
     const sender = b.addExecutable(.{
@@ -254,9 +254,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
-    exe_unit_tests.linkLibC();
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

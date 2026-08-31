@@ -37,7 +37,9 @@ const Queue = queue.Queue;
 // pub const message_size: u32 = message_size_param;
 // pub const queue_size: QueueLengthType = queue_size_param;
 
-pub const ZipcParams = packed struct {
+// Explicit backing integer: this is embedded in the `extern struct` channel
+// handles below, which requires a defined signedness.
+pub const ZipcParams = packed struct(u64) {
     message_size: u32,
     queue_size: QueueLengthType,
 };
@@ -236,7 +238,7 @@ pub const ZipcClientReceiver = extern struct {
             return .{ index, self.messageSlice(index, val) };
         } else {
             log.debug("queue empty, waiting", .{});
-            const timestamp_ms = std.time.milliTimestamp();
+            const timestamp_ms = os.monotonicMillis();
             const timeout_timespec = std.posix.timespec{
                 .sec = 0,
                 .nsec = @intCast((@as(u32, @intCast(timeout_ms)) % 1000) * 1_000_000),
@@ -256,7 +258,7 @@ pub const ZipcClientReceiver = extern struct {
             if (next) |item| {
                 return item;
             }
-            const elapsed_ms: i64 = std.time.milliTimestamp() - @as(i64, @intCast(timestamp_ms));
+            const elapsed_ms: i64 = os.monotonicMillis() - timestamp_ms;
             if (elapsed_ms < timeout_ms) {
                 const remaining_ms: i64 = @as(i64, @intCast(timeout_ms)) - elapsed_ms;
                 return self.receive_blocking(@truncate(@abs(remaining_ms)));
@@ -345,7 +347,7 @@ pub fn run_client() !void {
     const thread_id = std.Thread.getCurrentId();
     log.debug("client running in thread {}", .{thread_id});
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     const allocator = gpa.allocator();
     const message_size = 1536;
     const queue_size = 128;
@@ -362,7 +364,7 @@ pub fn run_client() !void {
         .linux => std.os.linux.mmap(
             null_addr,
             shared_memory_size,
-            std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
+            .{ .READ = true, .WRITE = true },
             .{
                 .TYPE = .SHARED,
             },
@@ -372,7 +374,7 @@ pub fn run_client() !void {
         .macos => std.c.mmap(
             null_addr,
             shared_memory_size,
-            std.posix.PROT.READ | std.posix.PROT.WRITE,
+            .{ .READ = true, .WRITE = true },
             .{
                 .TYPE = .SHARED,
             },
@@ -397,7 +399,7 @@ pub fn run_client() !void {
 }
 
 test "client server connection test" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     var allocator = gpa.allocator();
     const message_size = 1536;
     const queue_size = 128;
@@ -416,7 +418,7 @@ test "client server connection test" {
     const shared_mem_slice = os.mmap(
         fd,
         shared_memory_size,
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .READ = true, .WRITE = true },
         0,
     );
     const shared_memory: [*]align(8) u8 = @alignCast(shared_mem_slice.ptr);
