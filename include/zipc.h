@@ -67,9 +67,22 @@ extern "C" {
  * Creates a receiver that attaches to the shared memory segment.
  * The sender should be created first to initialize the shared memory.
  *
- * @param name Shared memory name (must start with '/', max 39 chars)
- * @param queue_size Number of message slots in the queue
- * @param message_size Maximum size of each message in bytes
+ * ERRORS: on failure (invalid name or parameters, shm open/resize/map
+ * failure, /dev/shm out of space) the reason is logged to stderr and the
+ * returned context has queue == NULL. Check it:
+ *
+ *     ZipcContext rx = zipc_create_receiver("/chan", 64, 1024);
+ *     if (rx.queue == NULL) { ... handle failure ... }
+ *
+ * Every zipc call on such a context is a safe no-op (receive returns 0,
+ * send returns false).
+ *
+ * @param name Shared memory name (must start with '/', contain no further
+ *             '/', max 39 chars; macOS enforces a shorter OS limit of 31)
+ * @param queue_size Number of message slots in the queue (min 2; usable
+ *                   capacity is queue_size - 1, one slot stays unused to
+ *                   distinguish full from empty)
+ * @param message_size Maximum size of each message in bytes (min 1)
  * @return Initialized ZipcContext configured as receiver
  */
 ZipcContext zipc_create_receiver(const char *name, uint32_t queue_size, uint32_t message_size);
@@ -79,13 +92,42 @@ ZipcContext zipc_create_receiver(const char *name, uint32_t queue_size, uint32_t
  *
  * Creates a sender and initializes the shared memory segment.
  * Should be called before zipc_create_receiver() on the same name.
+ * On Linux the full segment is preallocated at create time (fallocate), so
+ * shm space exhaustion fails here rather than as a SIGBUS during a later
+ * send; on platforms without preallocation exhaustion can still surface
+ * later.
  *
- * @param name Shared memory name (must start with '/', max 39 chars)
- * @param queue_size Number of message slots in the queue
- * @param message_size Maximum size of each message in bytes
+ * ERRORS: same contract as zipc_create_receiver() - on failure the returned
+ * context has queue == NULL and the reason is logged to stderr.
+ *
+ * @param name Shared memory name (must start with '/', contain no further
+ *             '/', max 39 chars; macOS enforces a shorter OS limit of 31)
+ * @param queue_size Number of message slots in the queue (min 2; usable
+ *                   capacity is queue_size - 1)
+ * @param message_size Maximum size of each message in bytes (min 1)
  * @return Initialized ZipcContext configured as sender
  */
 ZipcContext zipc_create_sender(const char *name, uint32_t queue_size, uint32_t message_size);
+
+/**
+ * @brief Destroy a context created by zipc_create_sender/receiver
+ *
+ * Unmaps the shared memory and sets the context's pointers to NULL. Any
+ * message pointer previously returned by zipc_receive() is invalid after
+ * this call. The shared memory segment itself stays in the filesystem (and
+ * keeps its contents for other attached processes) until zipc_unlink().
+ *
+ * Safe to call on an already-destroyed or failed context. After the call,
+ * zipc_send/zipc_receive on the context are safe no-ops.
+ *
+ * Not thread-safe: the context must not be concurrently in use by another
+ * thread when destroy runs. The no-op guarantee applies to calls made after
+ * destroy returns, as observed by the same thread or under external
+ * synchronization.
+ *
+ * @param context Sender or receiver context to destroy
+ */
+void zipc_destroy(ZipcContext *context);
 
 /**
  * @brief Remove shared memory segment
@@ -132,6 +174,10 @@ bool zipc_send(ZipcContext *sender, const uint8_t *message, size_t message_size)
  * before processing them, or to hand a pointer to another thread that may
  * outlive the next receive call. Both need a copy.
  *
+ * Note: a zero-length message and an empty queue both return 0; they are
+ * distinguished by *message, which is non-NULL for a dequeued zero-length
+ * message and NULL when the queue was empty.
+ *
  * @param receiver Pointer to receiver context
  * @param message Output: pointer to received message data (points into shared memory)
  * @return Message size in bytes, or 0 if queue is empty
@@ -149,7 +195,7 @@ uint32_t zipc_receive(ZipcContext *receiver, uint8_t **message);
  *
  * @param receiver Pointer to receiver context
  * @param message Output: pointer to received message data (points into shared memory)
- * @param timeout_millis Maximum wait time in milliseconds (must be < 1000)
+ * @param timeout_millis Maximum wait time in milliseconds (0..65535)
  * @return Message size in bytes, or 0 if timeout occurred
  */
 uint32_t zipc_receive_blocking(ZipcContext *receiver, uint8_t **message, uint16_t timeout_millis);
@@ -157,8 +203,13 @@ uint32_t zipc_receive_blocking(ZipcContext *receiver, uint8_t **message, uint16_
 /**
  * @brief Get the filesystem path for shared memory
  *
- * Returns the full path where the shared memory file is located
- * (e.g., /dev/shm/my-channel on Linux).
+ * Returns the OS-level identifier of the shared memory object: the full
+ * filesystem path on Linux (e.g. /dev/shm/my-channel); on macOS shm objects
+ * are kernel names rather than files, so the name itself is returned.
+ *
+ * The result points into a static buffer: it is valid until the next
+ * zipc_shm_path() call from any thread, and must not be freed. Returns an
+ * empty string for an invalid name.
  *
  * @param name Shared memory name
  * @return Full filesystem path (caller should not free)

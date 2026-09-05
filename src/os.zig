@@ -1,177 +1,223 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub fn shm_open(allocator: std.mem.Allocator, name: []const u8, flags: std.posix.O, mode: u16) std.posix.fd_t {
-    // std.debug.print("shm_open call for name {s}\n", .{name});
-    const dir = switch (builtin.target.os.tag) {
-        .linux => "/dev/shm/",
-        .macos => "/tmp/",
-        else => std.debug.panic("shm_open not implemented for this OS"),
-    };
+const log = std.log.scoped(.zipc);
 
-    // Check that the name starts with a slash ('/') as required by POSIX
-    if (name.len == 0 or name[0] != '/') {
-        // std.debug.print("name len: {} name {s}", .{ name.len, name });
-        std.debug.assert(false);
+pub const Error = error{
+    InvalidName,
+    NameTooLong,
+    OpenFailed,
+    TruncateFailed,
+    AllocateFailed,
+    MapFailed,
+};
+
+const shm_dir = switch (builtin.target.os.tag) {
+    .linux => "/dev/shm/",
+    // macOS shm objects are kernel names, not filesystem paths; shmPath
+    // returns the name itself there.
+    .macos => "",
+    else => @compileError("zipc: unsupported OS"),
+};
+
+/// Longest supported channel name, including the leading '/'. Note macOS
+/// enforces its own, shorter shm name limit (PSHMNAMLEN, 31).
+pub const max_name_len = 39;
+
+/// Buffer large enough for shmPath's result.
+pub const PathBuffer = [shm_dir.len + max_name_len + 1]u8;
+
+/// Builds the OS-level identifier for a channel name: "/dev/shm/foo" on
+/// Linux, the raw shm object name ("/foo") on macOS. The returned pointer
+/// aliases `buf`.
+pub fn shmPath(buf: *PathBuffer, name: []const u8) Error![*:0]const u8 {
+    if (name.len == 0 or name[0] != '/') return Error.InvalidName;
+    // POSIX shm names must not contain further slashes; allowing them would
+    // let a name escape the shm directory on Linux.
+    if (std.mem.indexOfScalarPos(u8, name, 1, '/') != null) return Error.InvalidName;
+    if (name.len > max_name_len) return Error.NameTooLong;
+    if (builtin.target.os.tag == .linux) {
+        @memcpy(buf[0..shm_dir.len], shm_dir);
+        @memcpy(buf[shm_dir.len..][0 .. name.len - 1], name[1..]);
+        buf[shm_dir.len + name.len - 1] = 0;
+    } else {
+        @memcpy(buf[0..name.len], name);
+        buf[name.len] = 0;
     }
-    const full_path = std.mem.concat(allocator, u8, &[_][]const u8{ dir, name[1..], "\x00"[0..1] }) catch {
-        std.process.exit(1);
-    };
+    return @ptrCast(buf);
+}
 
-    // std.debug.print("len2: {}, full path 2 {s} final char2: {}\n", .{ full_path.len, full_path, full_path[full_path.len - 1] });
-    defer allocator.free(full_path);
-    const path_ptr: [*:0]const u8 = @ptrCast(full_path.ptr);
-    // Open or create the shared memory object
-    return switch (builtin.target.os.tag) {
+/// Removes the shm object backing a channel name.
+pub fn shmUnlink(name: []const u8) Error!void {
+    var buf: PathBuffer = undefined;
+    const path = try shmPath(&buf, name);
+    switch (builtin.target.os.tag) {
+        .linux => unlink(path),
+        .macos => _ = std.c.shm_unlink(path),
+        else => comptime unreachable,
+    }
+}
+
+pub fn shm_open(name: []const u8, flags: std.posix.O, mode: u16) Error!std.posix.fd_t {
+    var buf: PathBuffer = undefined;
+    const path = try shmPath(&buf, name);
+    switch (builtin.target.os.tag) {
         .linux => {
-            const fd = std.os.linux.open(path_ptr, flags, mode);
-            std.debug.assert(fd != -1);
-            return @intCast(fd);
+            const rc = std.os.linux.open(path, flags, mode);
+            const err = std.os.linux.errno(rc);
+            if (err != .SUCCESS) {
+                log.err("open({s}) failed: {s}", .{ path, @tagName(err) });
+                return Error.OpenFailed;
+            }
+            return @intCast(rc);
         },
         .macos => {
-            const fd = std.c.shm_open(path_ptr, @bitCast(flags), mode);
-            std.debug.assert(fd != -1);
+            const fd = std.c.shm_open(path, @bitCast(flags), mode);
+            if (fd < 0) return Error.OpenFailed;
             return @intCast(fd);
         },
-        else => {
-            std.debug.panic("shm_open not implemented for this OS");
-        },
-    };
+        else => comptime unreachable,
+    }
+}
+
+pub fn close(fd: std.posix.fd_t) void {
+    switch (builtin.target.os.tag) {
+        .linux => _ = std.os.linux.close(fd),
+        .macos => _ = std.c.close(fd),
+        else => comptime unreachable,
+    }
 }
 
 pub fn unlink(path: [*:0]const u8) void {
     switch (builtin.target.os.tag) {
         .linux => {
-            std.debug.print("unlinking path:: {s}\n", .{path});
-            const result = std.os.linux.unlink(path);
-            const err = std.os.linux.errno(result);
-            if (result != 0) {
-                if (err == std.os.linux.E.NOENT) {
-                    std.debug.print("unlink: file not found, ignoring\n", .{});
-                    return;
-                } else if (err == std.os.linux.E.ACCES) {
-                    std.debug.print("unlink: permission denied, ignoring\n", .{});
-                    return;
-                }
-                std.debug.print("unlink: error {}\n", .{err});
-            } else {
-                std.debug.print("unlink: success\n", .{});
+            const rc = std.os.linux.unlink(path);
+            const err = std.os.linux.errno(rc);
+            if (err != .SUCCESS and err != .NOENT) {
+                log.warn("unlink({s}) failed: {s}", .{ path, @tagName(err) });
+            }
+        },
+        .macos => _ = std.c.unlink(path),
+        else => comptime unreachable,
+    }
+}
+
+pub fn ftruncate(fd: std.posix.fd_t, length: u64) Error!void {
+    switch (builtin.target.os.tag) {
+        .linux => {
+            const rc = std.os.linux.ftruncate(fd, @intCast(length));
+            const err = std.os.linux.errno(rc);
+            if (err != .SUCCESS) {
+                log.err("ftruncate({} bytes) failed: {s}", .{ length, @tagName(err) });
+                return Error.TruncateFailed;
             }
         },
         .macos => {
-            const result = std.c.unlink(path);
-            std.debug.assert(result == 0);
+            if (std.c.ftruncate(fd, @intCast(length)) != 0) {
+                // macOS shm objects can only be sized once; a second
+                // ftruncate on an already-sized object fails. Tolerate that
+                // when the existing size already matches.
+                var st: std.c.Stat = undefined;
+                if (std.c.fstat(fd, &st) != 0) return Error.TruncateFailed;
+                if (st.size != @as(@TypeOf(st.size), @intCast(length))) return Error.TruncateFailed;
+            }
         },
-        else => {
-            std.debug.panic("unlink not implemented for this OS");
-        },
+        else => comptime unreachable,
     }
 }
 
-// const dir = "/dev/shm/";
-// // Check that the name starts with a slash ('/') as required by POSIX
-// if (name.len == 0 or name[0] != '/') {
-//     std.debug.print("name len: {} name {s}", .{ name.len, name });
-//     std.debug.assert(false);
-// }
-// const full_path = std.mem.concat(allocator, u8, &[_][]const u8{ dir, name[1..], "\x00"[0..1] }) catch {
-//     std.process.exit(1);
-// };
-// defer allocator.free(full_path);
-
-pub fn ftruncate(fd: std.posix.fd_t, length: u64) void {
+/// Reserves backing pages for the whole segment up front, so that tmpfs
+/// exhaustion fails here - at create time, with an error - instead of as a
+/// SIGBUS on first touch inside send(). ftruncate alone only sets the size;
+/// tmpfs allocates pages lazily and happily overcommits.
+pub fn preallocate(fd: std.posix.fd_t, length: u64) Error!void {
     switch (builtin.target.os.tag) {
         .linux => {
-            const result = std.os.linux.ftruncate(fd, @intCast(length));
-            std.debug.assert(result == 0);
+            const rc = std.os.linux.fallocate(fd, 0, 0, @intCast(length));
+            const err = std.os.linux.errno(rc);
+            switch (err) {
+                .SUCCESS => {},
+                // Filesystem cannot preallocate; keep the lazy behavior.
+                .OPNOTSUPP, .NOSYS => {},
+                else => {
+                    log.err("fallocate({} bytes) failed: {s}", .{ length, @tagName(err) });
+                    return Error.AllocateFailed;
+                },
+            }
         },
-        .macos => {
-            const result = std.c.ftruncate(fd, @intCast(length));
-            std.debug.assert(result == 0);
-        },
-        else => {
-            std.debug.panic("ftruncate not implemented for this OS");
-        },
+        .macos => {},
+        else => comptime unreachable,
     }
 }
 
-pub fn mmap(fd: std.posix.fd_t, length: usize, prot: std.posix.PROT, offset: usize) []u8 {
+/// Maps the whole segment read-write, shared.
+pub fn mmap(fd: std.posix.fd_t, length: usize, offset: usize) Error![]align(8) u8 {
     switch (builtin.target.os.tag) {
         .linux => {
-            const flags: std.os.linux.MAP = .{
-                .TYPE = .SHARED,
-            };
-            const ptr = std.os.linux.mmap(null, length, prot, flags, fd, @intCast(offset));
-            std.debug.assert(ptr != 0);
-            const arr: [*]u8 = @ptrFromInt(ptr);
-            return arr[0..length];
+            const rc = std.os.linux.mmap(null, length, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED }, fd, @intCast(offset));
+            const err = std.os.linux.errno(rc);
+            if (err != .SUCCESS) {
+                log.err("mmap({} bytes) failed: {s}", .{ length, @tagName(err) });
+                return Error.MapFailed;
+            }
+            const ptr: [*]align(8) u8 = @ptrFromInt(rc);
+            return ptr[0..length];
         },
         .macos => {
-            const flags: std.c.MAP = .{
-                .TYPE = .SHARED,
-            };
-            const ptr_anyopaque = std.c.mmap(null, length, prot, flags, fd, @intCast(offset));
-            const arr: [*]u8 = @ptrCast(ptr_anyopaque);
-            return arr[0..length];
+            const ptr_anyopaque = std.c.mmap(null, length, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED }, fd, @intCast(offset));
+            if (ptr_anyopaque == std.c.MAP_FAILED) return Error.MapFailed;
+            const ptr: [*]align(8) u8 = @ptrCast(@alignCast(ptr_anyopaque));
+            return ptr[0..length];
         },
-        else => {
-            std.debug.panic("mmap not implemented for this OS");
+        else => comptime unreachable,
+    }
+}
+
+/// Monotonic clock reading in nanoseconds.
+pub fn monotonicNanos() u64 {
+    switch (builtin.target.os.tag) {
+        .linux => {
+            var ts: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+            return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
         },
+        .macos => {
+            var ts: std.c.timespec = undefined;
+            _ = std.c.clock_gettime(.MONOTONIC, &ts);
+            return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+        },
+        else => comptime unreachable,
+    }
+}
+
+pub fn munmap(ptr: [*]align(8) const u8, length: usize) void {
+    switch (builtin.target.os.tag) {
+        .linux => _ = std.os.linux.munmap(ptr, length),
+        .macos => _ = std.c.munmap(@ptrCast(@alignCast(@constCast(ptr))), length),
+        else => comptime unreachable,
     }
 }
 
 pub fn nanosleep(sec: u64, nsec: u32) void {
+    // Early return on EINTR is fine: every caller re-checks its own
+    // condition in a loop.
     switch (builtin.target.os.tag) {
         .linux => {
-            const timespec = std.os.linux.timespec{
-                .sec = @intCast(sec),
-                .nsec = @intCast(nsec),
-            };
-            const result = std.os.linux.nanosleep(&timespec, null);
-            std.debug.assert(result == 0);
+            const timespec = std.os.linux.timespec{ .sec = @intCast(sec), .nsec = @intCast(nsec) };
+            _ = std.os.linux.nanosleep(&timespec, null);
         },
         .macos => {
-            const timespec = std.c.timespec{
-                .sec = @intCast(sec),
-                .nsec = @intCast(nsec),
-            };
-            const result = std.c.nanosleep(&timespec, null);
-            std.debug.assert(result == 0);
+            const timespec = std.c.timespec{ .sec = @intCast(sec), .nsec = @intCast(nsec) };
+            _ = std.c.nanosleep(&timespec, null);
         },
-        else => {
-            std.debug.panic("nanosleep not implemented for this OS");
-        },
+        else => comptime unreachable,
     }
-}
-
-pub fn clockGettimeMonotonic() std.posix.timespec {
-    var ts: std.posix.timespec = undefined;
-    switch (builtin.target.os.tag) {
-        .linux => {
-            const result = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-            std.debug.assert(result == 0);
-        },
-        .macos => {
-            const result = std.c.clock_gettime(.MONOTONIC, &ts);
-            std.debug.assert(result == 0);
-        },
-        else => {
-            std.debug.panic("clock_gettime not implemented for this OS");
-        },
-    }
-    return ts;
-}
-
-/// Milliseconds off the monotonic clock, for measuring elapsed time.
-pub fn monotonicMillis() i64 {
-    const ts = clockGettimeMonotonic();
-    return @as(i64, ts.sec) * std.time.ms_per_s + @divFloor(@as(i64, ts.nsec), std.time.ns_per_ms);
 }
 
 pub fn getpid() i32 {
     switch (builtin.target.os.tag) {
         .linux => return std.os.linux.getpid(),
         .macos => return std.c.getpid(),
-        else => std.debug.panic("getpid not implemented for this OS"),
+        else => comptime unreachable,
     }
 }
