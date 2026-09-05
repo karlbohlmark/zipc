@@ -20,17 +20,13 @@
 #define MESSAGE_SIZE 1024
 
 
-char* receive_next_message(ZipcReceiver *receiver, uint8_t **message) {
+void receive_next_message(ZipcReceiver *receiver, uint8_t **message) {
     int message_size = zipc_receive(receiver, message);
     int sleep_duration_millis = 20;
     while(message_size == 0) {
         usleep(sleep_duration_millis * 1000);
         message_size = zipc_receive(receiver, message);
     }
-
-    
-    char *return_value = strdup((char *)message);
-    return return_value;
 }
 
 void* client_thread(void* arg) {

@@ -36,9 +36,9 @@ pub const ZipcServerSender = extern struct {
     padding: [7]u8,
     name: [39:0]u8,
     params: ZipcParams,
-    queue: *Queue,
-    buffers: [*]u8,
-    init_flag: *i32,
+    queue: ?*Queue,     // null = failed create or destroyed context
+    buffers: ?[*]u8,
+    init_flag: ?*i32,
 };
 ```
 
@@ -46,7 +46,7 @@ pub const ZipcServerSender = extern struct {
 
 | Method | Description |
 |--------|-------------|
-| `send(message: []const u8) void` | Sends a message to the queue. Copies data to shared memory and wakes the receiver. |
+| `send(message: []const u8) bool` | Sends a message to the queue. Copies data to shared memory and wakes the receiver if it is waiting. Returns `false` (publishing nothing) if the message exceeds `message_size` or the queue is full. |
 | `init(name, shared_mem_ptr, queue_size, message_size, server_id) ZipcServerSender` | Initializes a sender with an existing shared memory buffer. |
 | `getSharedMemorySize() usize` | Returns the total size of the shared memory segment. |
 | `getSharedMemoryPointer() [*]align(8) u8` | Returns a pointer to the shared memory region. |
@@ -64,9 +64,9 @@ pub const ZipcClientReceiver = extern struct {
     padding: [7]u8,
     name: [39:0]u8,
     params: ZipcParams,
-    queue: *Queue,
-    buffers: [*]align(8) u8,
-    init_flag: *i32,
+    queue: ?*Queue,     // null = failed create or destroyed context
+    buffers: ?[*]align(8) u8,
+    init_flag: ?*i32,
 };
 ```
 
@@ -75,7 +75,7 @@ pub const ZipcClientReceiver = extern struct {
 | Method | Description |
 |--------|-------------|
 | `receive() ?struct { u32, []u8 }` | Non-blocking receive. Returns `(index, message_slice)` or `null` if queue is empty. |
-| `receive_blocking(timeout_ms: u16) ?struct { u32, []u8 }` | Blocking receive with timeout (max 999ms). Uses futex on Linux for efficient waiting. |
+| `receive_blocking(timeout_ms: u16) ?struct { u32, []u8 }` | Blocking receive with timeout (0..65535 ms). Uses futex on Linux for efficient waiting. |
 | `init(name, shared_mem_ptr, queue_size, message_size, client_id) ZipcClientReceiver` | Initializes a receiver with an existing shared memory buffer. |
 | `sharedMemorySize() usize` | Returns the total size of the shared memory segment. |
 | `getSharedMemoryPointer() [*]align(8) u8` | Returns a pointer to the shared memory region. |
@@ -91,9 +91,9 @@ valid until the **next** receive call on that receiver. See
 Configuration parameters for the IPC channel.
 
 ```zig
-pub const ZipcParams = packed struct {
+pub const ZipcParams = extern struct {
     message_size: u32,  // Maximum size of each message in bytes
-    queue_size: u32,    // Number of message slots in the queue
+    queue_size: u32,    // Number of message slots in the queue (usable capacity is queue_size - 1)
 };
 ```
 
@@ -147,12 +147,12 @@ pub fn main() !void {
     const message_size = 1536;
     const zipc_path = "/my-zipc-path";
 
-    var sender = Zipc_c.zipc_create_sender(zipc_path, queue_size, message_size);
+    var sender = try Zipc_c.zipc_create_sender(zipc_path, queue_size, message_size);
 
     while (true) {
         const message = "hello!";
         _ = sender.send(message);
-        std.time.sleep(200_000_000); // 200ms
+        std.Thread.sleep(200_000_000); // 200ms
     }
 }
 ```
@@ -167,7 +167,7 @@ pub fn main() !void {
     const message_size = 1536;
     const zipc_path = "/my-zipc-path";
 
-    var receiver = Zipc_c.zipc_create_receiver(zipc_path, queue_size, message_size);
+    var receiver = try Zipc_c.zipc_create_receiver(zipc_path, queue_size, message_size);
 
     while (receiver.receive_blocking(800)) |item| {
         _, const message_slice = item;
@@ -251,10 +251,28 @@ Creates a receiver context and attaches to an existing shared memory segment.
 
 **Parameters:**
 - `name`: Shared memory name (must match the sender's name)
-- `queue_size`: Number of message slots (must match sender)
+- `queue_size`: Number of message slots (must match sender; usable capacity is `queue_size - 1`)
 - `message_size`: Maximum message size (must match sender)
 
 **Returns:** Initialized `ZipcContext` configured as receiver.
+
+**Errors:** on failure (invalid name/parameters, shm open/resize/map failure) the
+returned context has `queue == NULL` and the reason is logged to stderr. All zipc
+calls on such a context are safe no-ops. The same contract applies to
+`zipc_create_sender`.
+
+---
+
+#### `zipc_destroy`
+
+```c
+void zipc_destroy(ZipcContext *context);
+```
+
+Unmaps the channel's shared memory and invalidates the context (works for both
+sender and receiver contexts). Message pointers previously returned by
+`zipc_receive` are invalid after this call. The segment itself remains in the
+filesystem until `zipc_unlink`. Safe to call twice or on a failed context.
 
 ---
 
@@ -335,7 +353,7 @@ Blocking receive with timeout. Waits for a message using futex (Linux) or pollin
 **Parameters:**
 - `receiver`: Pointer to the receiver context
 - `message`: Output pointer that will be set to the message data
-- `timeout_millis`: Maximum time to wait in milliseconds (must be < 1000)
+- `timeout_millis`: Maximum time to wait in milliseconds (0..65535)
 
 **Returns:** Message size in bytes, or `0` if timeout occurred.
 

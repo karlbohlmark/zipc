@@ -31,6 +31,18 @@ pub fn build(b: *std.Build) void {
     // Strip option to remove debug symbols
     const strip = b.option(bool, "strip", "Strip debug symbols from the binary") orelse false;
 
+    // compiler_rt carries weak definitions of memcpy, memmove, memset, memcmp, bcmp and
+    // strlen. When a C or C++ program links libzipc.a against a dynamic libc, the linker
+    // extracts that archive member to satisfy the program's own undefined memcpy before it
+    // reaches libc.so, and a weak definition in a regular object is not overridden by a
+    // shared library: the whole program then runs Zig's generic copies instead of libc's.
+    // Consumers that link libc should therefore build with -Dbundle-compiler-rt=false.
+    const bundle_compiler_rt = b.option(
+        bool,
+        "bundle-compiler-rt",
+        "Bundle compiler_rt into libzipc.a (default true). Use false when the consumer links libc, so libc keeps its own memcpy and friends",
+    ) orelse true;
+
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "zipc",
@@ -42,9 +54,12 @@ pub fn build(b: *std.Build) void {
             .target = final_target,
             .pic = true,
             .strip = strip,
+            // __zig_probe_stack is the one symbol the library would still need from
+            // compiler_rt, so stack probing goes when compiler_rt does.
+            .stack_check = if (bundle_compiler_rt) null else false,
         }),
     });
-    lib.bundle_compiler_rt = true;
+    lib.bundle_compiler_rt = bundle_compiler_rt;
     if (target.result.os.tag.isDarwin()) {
         lib.root_module.link_libc = true;
     }

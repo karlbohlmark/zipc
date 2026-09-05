@@ -5,7 +5,7 @@ const message_size = 4;
 // const zipc_c = Zipc_c(8, 4);
 const zipc_path = "/my-zipc-path";
 pub fn main() !void {
-    var receiver = Zipc_c.zipc_create_receiver(zipc_path, queue_size, message_size);
+    var receiver = try Zipc_c.zipc_create_receiver(zipc_path, queue_size, message_size);
 
     // To allow starting the receiver before the sender, we wait for a first message
     // to be received before starting the main loop.
