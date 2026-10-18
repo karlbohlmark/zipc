@@ -67,46 +67,47 @@ pub const ZipcServerSender = extern struct {
     /// `params.message_size`, the queue is full, or the context is invalid.
     /// `message` must not alias the channel's own buffer region.
     pub fn send(self: *Self, message: []const u8) bool {
-        const q = self.queue orelse return false;
-        // Checked before anything else so a rejected message never touches
-        // shared memory. Slots are message_size bytes and are not guarded by a
-        // redzone: the last slot is followed by the init flag and then the end
-        // of the mapping.
-        if (message.len > self.params.message_size) {
-            @branchHint(.unlikely);
-            log.debug("rejecting {}-byte message, message_size is {}", .{ message.len, self.params.message_size });
-            return false;
-        }
+        const reservation = self.reserve(message.len) orelse return false;
+        @memcpy(reservation.buffer, message);
+        reservation.commit();
+        return true;
+    }
 
-        // Claim the slot before writing into it. When the queue is full the
-        // next slot is the one the consumer is currently holding a pointer to,
-        // so copying first and asking afterwards corrupts a message that has
-        // already been delivered.
-        const next_index = q.reserve(self.params.queue_size) orelse {
-            @branchHint(.unlikely);
-            return false;
-        };
+    /// A producer-local reservation, not additional shared state. Fill `buffer`
+    /// and commit exactly once, or abandon without publishing. Do not call send
+    /// or reserve again through any sender for this queue while retaining a
+    /// reservation. The sender and mapping must outlive it; this remains SPSC.
+    pub const Reservation = struct {
+        sender: *const Self,
+        index: QueueLengthType,
+        buffer: []u8,
 
-        // usize math: at video-scale configs (megabyte slots) the byte offset
-        // does not fit in u32.
-        const start_offset = @as(usize, next_index) * @as(usize, self.params.message_size);
-        const slot = (self.buffers.?)[start_offset..][0..message.len];
-        @memcpy(slot, message);
-        q.commit(self.params.queue_size, next_index, message.len);
-
-        if (builtin.target.os.tag == .linux) {
-            // Wake only when a consumer is actually parked in futex_wait.
-            // commit()'s seq_cst tail store is ordered before this seq_cst
-            // load, and the consumer registers in `waiters` (seq_cst RMW)
-            // before the kernel re-checks tail against its expected value -
-            // so either we observe the registration, or the consumer observes
-            // the new tail and does not sleep.
-            if (@atomicLoad(u32, &q.waiters, .seq_cst) != 0) {
-                @branchHint(.unlikely);
-                _ = std.os.linux.futex_3arg(@ptrCast(&q.tail), .{ .cmd = .WAKE, .private = false }, 1);
+        /// Infallible publication of the reserved length, including the same
+        /// parked-consumer wake protocol as send(). Do not use buffer afterwards.
+        pub fn commit(self: Reservation) void {
+            const q = self.sender.queue.?;
+            q.commit(self.sender.params.queue_size, self.index, self.buffer.len);
+            if (builtin.target.os.tag == .linux) {
+                // The seq_cst tail publication and waiter load pair with the
+                // receiver's registration and futex expected-value check.
+                if (@atomicLoad(u32, &q.waiters, .seq_cst) != 0) {
+                    @branchHint(.unlikely);
+                    _ = std.os.linux.futex_3arg(@ptrCast(&q.tail), .{ .cmd = .WAKE, .private = false }, 1);
+                }
             }
         }
-        return true;
+    };
+
+    /// Returns null without touching storage for an invalid context, oversized
+    /// message or full queue. Reserving does not advance the queue; abandonment
+    /// needs no rollback. Reserve before writing, since a full queue's next slot
+    /// can still be held by the receiver. Zero-length messages are supported.
+    pub fn reserve(self: *const Self, length: usize) ?Reservation {
+        const q = self.queue orelse return null;
+        if (length > self.params.message_size) return null;
+        const index = q.reserve(self.params.queue_size) orelse return null;
+        const start = @as(usize, index) * @as(usize, self.params.message_size);
+        return .{ .sender = self, .index = index, .buffer = self.buffers.?[start..][0..length] };
     }
 
     pub fn init(name: [*:0]const u8, shared_mem_ptr: [*]align(8) u8, queue_size: QueueLengthType, message_size: u32, server_id: u64) ZipcServerSender {
@@ -461,4 +462,73 @@ test "client server connection test" {
 
 fn queueByteSize(length: queue.LengthType) usize {
     return @sizeOf(queue.Queue) + @as(usize, length) * @sizeOf(queue.ValueType);
+}
+
+test "sender reservations share send capacity, abandonment and wrap semantics" {
+    var storage: [getSharedMemorySize(3, 8)]u8 align(8) = @splat(0);
+    var sender = initServerSenderWithBuffer("reservation-test", &storage, 3, 8, 0);
+    var receiver = initClient("reservation-test", &storage, 3, 8, 0);
+    var invalid = invalidServerSender();
+    try std.testing.expect(invalid.reserve(1) == null);
+    try std.testing.expect(sender.reserve(9) == null);
+    {
+        const abandoned = sender.reserve(4).?;
+        @memcpy(abandoned.buffer, "lost");
+        try std.testing.expect(receiver.receive() == null);
+    }
+    for (0..20) |_| {
+        const first = sender.reserve(4).?;
+        @memcpy(first.buffer, "test");
+        try std.testing.expect(receiver.receive() == null);
+        first.commit();
+        try std.testing.expect(sender.send("next"));
+        try std.testing.expect(sender.reserve(0) == null);
+        const held = receiver.receive().?.@"1";
+        try std.testing.expectEqualStrings("test", held);
+        const last = sender.reserve(0).?;
+        last.commit();
+        try std.testing.expect(sender.reserve(1) == null);
+        try std.testing.expectEqualStrings("test", held);
+        try std.testing.expectEqualStrings("next", receiver.receive().?.@"1");
+        try std.testing.expectEqual(@as(usize, 0), receiver.receive().?.@"1".len);
+        try std.testing.expect(receiver.receive() == null);
+    }
+}
+
+test "reserved commit wakes a registered futex receiver" {
+    if (builtin.target.os.tag != .linux) return error.SkipZigTest;
+    const linux = std.os.linux;
+    var storage: [getSharedMemorySize(3, 8)]u8 align(8) = @splat(0);
+    var sender = initServerSenderWithBuffer("reservation-wake", &storage, 3, 8, 0);
+    var receiver = initClient("reservation-wake", &storage, 3, 8, 0);
+    const Waiter = struct {
+        q: *Queue,
+        result: linux.E = .TIMEDOUT,
+        fn run(self: *@This()) void {
+            self.q.registerWaiter();
+            defer self.q.unregisterWaiter();
+            const timeout: linux.timespec = .{ .sec = 2, .nsec = 0 };
+            self.result = linux.errno(linux.futex_4arg(@ptrCast(&self.q.tail), .{ .cmd = .WAIT, .private = false }, 0, &timeout));
+        }
+    };
+    var waiter: Waiter = .{ .q = sender.queue.? };
+    const thread = try std.Thread.spawn(.{}, Waiter.run, .{&waiter});
+    var joined = false;
+    defer if (!joined) thread.join();
+    const deadline = os.monotonicNanos() + std.time.ns_per_s;
+    while (@atomicLoad(u32, &waiter.q.waiters, .seq_cst) == 0) {
+        if (os.monotonicNanos() >= deadline) return error.WaiterNotStarted;
+        std.atomic.spinLoopHint();
+    }
+    // Let the registered consumer enter the kernel. A scheduling race remains
+    // valid: futex's expected-tail check must then return AGAIN, never time out.
+    const pause: linux.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
+    _ = linux.nanosleep(&pause, null);
+    const reservation = sender.reserve(4).?;
+    @memcpy(reservation.buffer, "wake");
+    reservation.commit();
+    thread.join();
+    joined = true;
+    try std.testing.expect(waiter.result == .SUCCESS or waiter.result == .AGAIN);
+    try std.testing.expectEqualStrings("wake", receiver.receive().?.@"1");
 }
