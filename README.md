@@ -23,6 +23,18 @@ zig build -Doptimize=ReleaseFast
 
 ## Zig API
 
+Zig packages can import the `zipc` module without linking the C library:
+
+```zig
+const zipc = b.dependency("zipc", .{ .target = target, .optimize = optimize }).module("zipc");
+exe.root_module.addImport("zipc", zipc);
+```
+
+The module supports application-owned shared mappings through
+`initServerSenderWithBuffer` and `initClient`. Initialize zero-filled storage
+before attaching the endpoints. Use `receive()` for nonblocking polling; no
+notification descriptor or blocking receiver is required.
+
 ### Types
 
 #### `ZipcServerSender`

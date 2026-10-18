@@ -28,6 +28,13 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    // Zig consumers can use the queue directly with application-owned mappings.
+    _ = b.addModule("zipc", .{
+        .root_source_file = b.path("src/zipc.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Strip option to remove debug symbols
     const strip = b.option(bool, "strip", "Strip debug symbols from the binary") orelse false;
 
@@ -215,16 +222,20 @@ pub fn build(b: *std.Build) void {
 
     const receiver_run_cmd = b.addRunArtifact(receiver);
     receiver_run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        receiver_run_cmd.addArgs(args);
+    if (@hasField(std.Build, "args")) {
+        if (b.args) |args| receiver_run_cmd.addArgs(args);
+    } else {
+        receiver_run_cmd.addPassthruArgs();
     }
     const receiver_run_step = b.step("run-receiver", "Run the receiver");
     receiver_run_step.dependOn(&receiver_run_cmd.step);
 
     const sender_run_cmd = b.addRunArtifact(sender);
     sender_run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        sender_run_cmd.addArgs(args);
+    if (@hasField(std.Build, "args")) {
+        if (b.args) |args| sender_run_cmd.addArgs(args);
+    } else {
+        sender_run_cmd.addPassthruArgs();
     }
     const sender_run_step = b.step("run-sender", "Run the sender");
     sender_run_step.dependOn(&sender_run_cmd.step);
@@ -242,8 +253,10 @@ pub fn build(b: *std.Build) void {
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+    if (@hasField(std.Build, "args")) {
+        if (b.args) |args| run_cmd.addArgs(args);
+    } else {
+        run_cmd.addPassthruArgs();
     }
 
     // This creates a build step. It will be visible in the `zig build --help` menu,
