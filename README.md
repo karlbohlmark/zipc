@@ -35,6 +35,15 @@ The module supports application-owned shared mappings through
 before attaching the endpoints. Use `receive()` for nonblocking polling; no
 notification descriptor or blocking receiver is required.
 
+For publication that must be infallible after an external side effect, use
+`sender.reserve(length)`. It returns null for an invalid context, oversized message
+or full queue. Fill the returned `reservation.buffer`, then call
+`reservation.commit()`. This publishes the reserved length and wakes a parked
+receiver using exactly the same protocol as `send()`; polling receivers cause no
+wake syscall. Abandonment publishes nothing and needs no rollback. Reservations
+are producer-local: do not send or reserve again on the queue until committing
+once or abandoning, and keep the sender and mapping alive throughout.
+
 ### Types
 
 #### `ZipcServerSender`
